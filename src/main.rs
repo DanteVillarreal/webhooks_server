@@ -23,6 +23,6 @@ async fn main() {
         });
 
     warp::serve(webhook_route)
-        .run(([127, 0, 0, 1], 3030))
+        .run(([127, 0, 0, 1], 80))
         .await;
 }
