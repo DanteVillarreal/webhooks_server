@@ -60,12 +60,13 @@ pub async fn handle_message(message: Message, input_text: String, openai_key: St
 
 pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
     let client = Client::new();
-    //WHY ARE WE USING V1 AND DAVINCI-CODEX??
-    let response = match client.post("https://api.openai.com/v1/engines/davinci-codex/completions")
+
+    let response = match client.post("https://api.openai.com/v1/completions")
         .header("Authorization", format!("Bearer {}", openai_key))
         .json(&serde_json::json!({
-            "prompt": input,
-            "max_tokens": 150,
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": input}],
+            "max_tokens": 15000,
         }))
         .send()
         .await {
@@ -86,5 +87,5 @@ pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
 
     log::info!("OpenAI response: {:?}", response_json);
 
-    response_json["choices"][0]["text"].as_str().unwrap_or("").to_string()
+    response_json["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string()
 }

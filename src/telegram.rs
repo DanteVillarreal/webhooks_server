@@ -62,30 +62,36 @@ use log::{info, error}; // Import logging macros
 
 pub async fn run_telegram_bot() {
     let bot = Bot::from_env();
-    info!("Bot started");
+    log::info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
 
     teloxide::repl(bot, move |message: teloxide::types::Message, bot: Bot| {
         let openai_key = openai_key.clone();
         async move {
             if let Some(text) = message.text() {
-                info!("Received message: {}", text);
+                log::info!("Received message: {}", text);
 
                 // Call OpenAI API
                 let response_text = call_openai_api(&openai_key, text).await;
 
+                // Handle empty response
+                let response_message = if response_text.trim().is_empty() {
+                    "Sorry, I didn't get that. Can you please rephrase?".to_string()
+                } else {
+                    response_text
+                };
+
                 if let Err(e) = bot.send_message(
                     message.chat.id,
-                    response_text,
+                    response_message,
                 )
                 .await {
-                    error!("Error sending message: {}", e);
-                } 
-                else {
-                    info!("Sent response to user");
+                    log::error!("Error sending message: {}", e);
+                } else {
+                    log::info!("Sent response to user");
                 }
             } else {
-                info!("Received a message without text");
+                log::info!("Received a message without text");
             }
             respond(())
         }
