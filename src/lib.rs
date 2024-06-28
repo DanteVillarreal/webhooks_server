@@ -66,7 +66,7 @@ pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
         .json(&serde_json::json!({
             "model": "gpt-4o",
             "messages": [{"role": "user", "content": input}],
-            "max_tokens": 15000,
+            //"max_tokens": 15000,
         }))
         .send()
         .await {
