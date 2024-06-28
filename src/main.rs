@@ -25,12 +25,39 @@ use webhooks_server::telegram::run_telegram_bot;
 //     let _ = join!(webhook_server, telegram_bot);
 // }
 
-use env_logger; // Import env_logger
+//use env_logger; // Import env_logger
+use std::fs;
+//use std::io::Write;
+use log::info;
+use log4rs::{
+    append::file::FileAppender, config::{Appender, Config, Root}, encode::pattern::PatternEncoder,
+};
 #[tokio::main]
 async fn main() {
     dotenv().ok(); // Load environment variables from .env file
-    env_logger::init(); // Initialize the logger
     
+    let log_file_path = env::var("LOG_FILE_PATH").unwrap_or_else(|_| "logs/webhooks_server.log".to_string());
+
+    // Ensure the logs directory exists
+    fs::create_dir_all("logs").expect("Failed to create logs directory");
+
+    // Configure file logging
+    let logfile = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new("{d} - {l} - {m}{n}")))
+        .build(log_file_path)
+        .unwrap();
+
+    // Build the logger configuration
+    let config = Config::builder()
+        .appender(Appender::builder().build("logfile", Box::new(logfile)))
+        .build(Root::builder().appender("logfile").build(log::LevelFilter::Info))
+        .unwrap();
+
+    // Initialize logger
+    log4rs::init_config(config).unwrap();
+
+    info!("Logging started");
+
     // Ensure environment variables are set
     let _ = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
     let _ = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
