@@ -7,72 +7,72 @@ use tokio::sync::Mutex;
 use std::env;
 use crate::call_openai_api;
 
-// pub async fn run_telegram_bot() {
-//     let bot = Bot::from_env();
-//     let user_assistant_map: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
-
-//     let cloned_map = Arc::clone(&user_assistant_map);
-//     teloxide::repl(bot, move |message: teloxide::types::Message, bot: Bot| {
-//         let user_assistant_map = Arc::clone(&cloned_map);
-//         async move {
-//             if let Some(text) = message.text() {
-//                 if text == "/list_assistants" {
-//                     match list_assistants().await {
-//                         Ok(response) => {
-//                             bot.send_message(message.chat.id, response).await?;
-//                         }
-//                         Err(e) => {
-//                             bot.send_message(message.chat.id, format!("Error: {:?}", e)).await?;
-//                         }
-//                     }
-//                 } else if text.starts_with("/create_assistant") {
-//                     let assistant_name = text.trim_start_matches("/create_assistant").trim();
-//                     match create_assistant(assistant_name).await {
-//                         Ok(response) => {
-//                             bot.send_message(message.chat.id, response).await?;
-//                         }
-//                         Err(e) => {
-//                             bot.send_message(message.chat.id, format!("Error: {:?}", e)).await?;
-//                         }
-//                     }
-//                 } else if text.starts_with("/use_assistant") {
-//                     if let Some(user_id) = message.from().map(|user| user.id) {
-//                         let assistant_id = text.trim_start_matches("/use_assistant").trim().to_string();
-//                         let mut map = user_assistant_map.lock().await;
-//                         map.insert(user_id.0, assistant_id.clone());
-//                         bot.send_message(message.chat.id, format!("Switched to assistant: {}", assistant_id)).await?;
-//                     }
-//                 } else {
-//                     if let Some(user_id) = message.from().map(|user| user.id) {
-//                         let map = user_assistant_map.lock().await;
-//                         let assistant_id = map.get(&user_id.0).cloned().unwrap_or_else(|| "default_assistant_id".to_string());
-//                         let response = call_openai_api(&assistant_id, text).await; // Use assistant_id here.
-//                         bot.send_message(message.chat.id, response).await?;
-//                     }
-//                 }
-//             }
-//             respond(())
-//         }
-//     })
-//     .await;
-// }
-
-
 pub async fn run_telegram_bot() {
     let bot = Bot::from_env();
-    
-    teloxide::repl(bot, |message: teloxide::types::Message, bot: Bot| async move {
-        if let Some(text) = message.text() {
-            bot.send_message(
-                message.chat.id,
-                format!("Received your message: {}", text),
-            )
-            .await?;
+    let user_assistant_map: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    let cloned_map = Arc::clone(&user_assistant_map);
+    teloxide::repl(bot, move |message: teloxide::types::Message, bot: Bot| {
+        let user_assistant_map = Arc::clone(&cloned_map);
+        async move {
+            if let Some(text) = message.text() {
+                if text == "/list_assistants" {
+                    match list_assistants().await {
+                        Ok(response) => {
+                            bot.send_message(message.chat.id, response).await?;
+                        }
+                        Err(e) => {
+                            bot.send_message(message.chat.id, format!("Error: {:?}", e)).await?;
+                        }
+                    }
+                } else if text.starts_with("/create_assistant") {
+                    let assistant_name = text.trim_start_matches("/create_assistant").trim();
+                    match create_assistant(assistant_name).await {
+                        Ok(response) => {
+                            bot.send_message(message.chat.id, response).await?;
+                        }
+                        Err(e) => {
+                            bot.send_message(message.chat.id, format!("Error: {:?}", e)).await?;
+                        }
+                    }
+                } else if text.starts_with("/use_assistant") {
+                    if let Some(user_id) = message.from().map(|user| user.id) {
+                        let assistant_id = text.trim_start_matches("/use_assistant").trim().to_string();
+                        let mut map = user_assistant_map.lock().await;
+                        map.insert(user_id.0, assistant_id.clone());
+                        bot.send_message(message.chat.id, format!("Switched to assistant: {}", assistant_id)).await?;
+                    }
+                } else {
+                    if let Some(user_id) = message.from().map(|user| user.id) {
+                        let map = user_assistant_map.lock().await;
+                        let assistant_id = map.get(&user_id.0).cloned().unwrap_or_else(|| "default_assistant_id".to_string());
+                        let response = call_openai_api(&assistant_id, text).await; // Use assistant_id here.
+                        bot.send_message(message.chat.id, response).await?;
+                    }
+                }
+            }
+            respond(())
         }
-        respond(())
     })
     .await;
 }
+
+
+// pub async fn run_telegram_bot() {
+//     let bot = Bot::from_env();
+    
+//     teloxide::repl(bot, |message: teloxide::types::Message, bot: Bot| async move {
+//         if let Some(text) = message.text() {
+//             bot.send_message(
+//                 message.chat.id,
+//                 format!("Received your message: {}", text),
+//             )
+//             .await?;
+//         }
+//         respond(())
+//     })
+//     .await;
+// }
 
 
 async fn list_assistants() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
