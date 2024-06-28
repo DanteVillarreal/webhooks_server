@@ -61,12 +61,21 @@ pub async fn handle_message(message: Message, input_text: String, openai_key: St
 pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
     let client = Client::new();
 
-    let response = match client.post("https://api.openai.com/v1/completions")
+    let response = match client.post("https://api.openai.com/v1/chat/completions")
+        .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
         .json(&serde_json::json!({
             "model": "gpt-4o",
-            "messages": [{"role": "user", "content": input}],
-            //"max_tokens": 15000,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant."
+                },
+                {
+                    "role": "user",
+                    "content": input
+                }
+            ]
         }))
         .send()
         .await {
