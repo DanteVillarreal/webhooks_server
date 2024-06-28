@@ -80,7 +80,8 @@ pub async fn run_telegram_bot() {
                 )
                 .await {
                     error!("Error sending message: {}", e);
-                } else {
+                } 
+                else {
                     info!("Sent response to user");
                 }
             } else {

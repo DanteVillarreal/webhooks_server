@@ -61,18 +61,30 @@ pub async fn handle_message(message: Message, input_text: String, openai_key: St
 pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
     let client = Client::new();
     //WHY ARE WE USING V1 AND DAVINCI-CODEX??
-    let response = client.post("https://api.openai.com/v1/engines/davinci-codex/completions")
+    let response = match client.post("https://api.openai.com/v1/engines/davinci-codex/completions")
         .header("Authorization", format!("Bearer {}", openai_key))
         .json(&serde_json::json!({
             "prompt": input,
             "max_tokens": 150,
         }))
         .send()
-        .await
-        .expect("Failed to send request")
-        .json::<serde_json::Value>()
-        .await
-        .expect("Failed to parse response");
+        .await {
+            Ok(res) => res,
+            Err(err) => {
+                log::error!("Failed to send request to OpenAI: {:?}", err);
+                return "Failed to get response from OpenAI".to_string();
+            }
+        };
 
-    response["choices"][0]["text"].as_str().unwrap_or("").to_string()
+    let response_json = match response.json::<serde_json::Value>().await {
+        Ok(json) => json,
+        Err(err) => {
+            log::error!("Failed to parse response from OpenAI: {:?}", err);
+            return "Failed to parse response from OpenAI".to_string();
+        }
+    };
+
+    log::info!("OpenAI response: {:?}", response_json);
+
+    response_json["choices"][0]["text"].as_str().unwrap_or("").to_string()
 }
