@@ -113,7 +113,10 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
         .send()
         .await?;
 
-    let response_json: serde_json::Value = response.json().await?;
+    let response_text = response.text().await?;
+    log::info!("Received response from create_openai_thread: {}", response_text);
+
+    let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
     let thread_id = response_json["id"].as_str().ok_or_else(|| anyhow::anyhow!("Thread ID not found in response"))?.to_string();
     log::info!("Created new thread with ID: {}", thread_id);
     Ok(thread_id)
