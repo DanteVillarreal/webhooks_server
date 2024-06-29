@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::env;
 
+use anyhow;
+
 pub mod webhooks;
 pub mod telegram;
 
@@ -97,4 +99,44 @@ pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
     log::info!("OpenAI response: {:?}", response_json);
 
     response_json["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string()
+}
+
+pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+
+    let response = client.post("https://api.openai.com/v1/threads")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .json(&serde_json::json!({
+            "messages": [ {"role": "user", "content": initial_message} ],
+        }))
+        .send()
+        .await?;
+
+    let response_json: serde_json::Value = response.json().await?;
+    let thread_id = response_json["id"].as_str().ok_or_else(|| anyhow::anyhow!("Thread ID not found in response"))?.to_string();
+    log::info!("Created new thread with ID: {}", thread_id);
+    Ok(thread_id)
+}
+
+pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: &str) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+
+    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .json(&serde_json::json!({
+            "messages": [{"role": "user", "content": message}],
+        }))
+        .send()
+        .await?;
+
+    let response_json: serde_json::Value = response.json().await?;
+    let response_content = response_json["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
+        .to_string();
+    log::info!("lib.rs: Sent message to thread ID: {}, response: {}", thread_id, response_content);
+
+    Ok(response_content)
 }

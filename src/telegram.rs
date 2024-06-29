@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::call_openai_api;
+use crate::{call_openai_api, send_message_to_thread, create_openai_thread};
+use anyhow::anyhow;
+
 
 // pub async fn run_telegram_bot() {
 //     let bot = Bot::from_env();
@@ -57,6 +59,10 @@ use crate::call_openai_api;
 //     .await;
 // }
 
+// Global HashMap to store user_id to thread_id mappings
+lazy_static::lazy_static! {
+    static ref USER_THREADS: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
+}
 
 use log::{info, error}; // Import logging macros
 
@@ -65,39 +71,64 @@ pub async fn run_telegram_bot() {
     log::info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
 
-    teloxide::repl(bot, move |message: teloxide::types::Message, bot: Bot| {
+    teloxide::repl(bot.clone(), move |message: Message, bot: Bot| {
         let openai_key = openai_key.clone();
         async move {
             if let Some(text) = message.text() {
                 log::info!("Received message: {}", text);
-
-                // Call OpenAI API
-                let response_text = call_openai_api(&openai_key, text).await;
-
-                // Handle empty response
-                let response_message = if response_text.trim().is_empty() {
-                    "Sorry, I didn't get that. Can you please rephrase?".to_string()
-                } else {
-                    response_text
+                let user_id: anyhow::Result<u64> = message.from()
+                    .map(|user| user.id.0)
+                    .ok_or_else(|| anyhow!(
+                        "User not found in the incoming message. Message details: chat_id={}, text={}",
+                        message.chat.id,
+                        text
+                    ));
+                
+                let user_id = match user_id {
+                    Ok(id) => id,
+                    Err(err) => {
+                        bot.send_message(message.chat.id, err.to_string()).await?;
+                        return respond(());
+                    }
                 };
 
-                if let Err(e) = bot.send_message(
-                    message.chat.id,
-                    response_message,
-                )
-                .await {
-                    log::error!("Error sending message: {}", e);
+                // Lock the global HashMap for thread safety
+                let mut user_threads = USER_THREADS.lock().await;
+
+                let thread_id = if let Some(thread_id) = user_threads.get(&user_id) {
+                    thread_id.to_string()
                 } else {
-                    log::info!("Sent response to user");
+                    // Create a new thread
+                    match create_openai_thread(&openai_key, text).await {
+                        Ok(thread_id) => {
+                            user_threads.insert(user_id, thread_id.clone());
+                            thread_id
+                        }
+                        Err(e) => {
+                            log::error!("Failed to create thread: {}", e);
+                            bot.send_message(message.chat.id, "Failed to create thread. Please try again later.").await?;
+                            return respond(());
+                        }
+                    }
+                };
+
+                // Send message to the thread
+                match send_message_to_thread(&openai_key, &thread_id, text).await {
+                    Ok(response) => {
+                        bot.send_message(message.chat.id, response).await?;
+                    }
+                    Err(e) => {
+                        log::error!("Error sending message to thread: {}", e);
+                        bot.send_message(message.chat.id, "Failed to send message. Please try again later.").await?;
+                    }
                 }
-            } else {
-                log::info!("Received a message without text");
             }
             respond(())
         }
     })
     .await;
 }
+
 
 
 

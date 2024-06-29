@@ -59,17 +59,21 @@ async fn main() {
     info!("Logging started");
 
     // Ensure environment variables are set
-    let _ = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
-    let _ = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
+    let _openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
+    let _teloxide_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
+
+    info!("Environment variables loaded");
+    info!("Starting webhook server and telegram bot...");
 
     let webhook_server = tokio::spawn(async {
         run_webhook_server().await;
+        info!("Webhook server started");
     });
 
     let telegram_bot = tokio::spawn(async {
         run_telegram_bot().await;
+        info!("Telegram bot started");
     });
 
     let _ = join!(webhook_server, telegram_bot);
 }
-
