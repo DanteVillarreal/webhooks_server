@@ -103,13 +103,15 @@ pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
 
 pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
+    let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql"; // Your assistant ID
 
     let response = client.post("https://api.openai.com/v1/threads")
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
         .header("OpenAI-Beta", "assistants=v2")
         .json(&serde_json::json!({
-            "messages": [ {"role": "user", "content": initial_message} ],
+            "assistant_id": assistant_id,  // Include the assistant ID in the creation payload
+            "messages": [{"role": "user", "content": initial_message}]
         }))
         .send()
         .await?;
@@ -117,16 +119,21 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
     let response_text = response.text().await?;
     log::info!("Received response from create_openai_thread: {}", response_text);
 
-    let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
-    let thread_id = response_json["id"].as_str().ok_or_else(|| anyhow::anyhow!("Thread ID not found in response"))?.to_string();
+    let response_json = serde_json::from_str::<serde_json::Value>(&response_text)?;
+    let thread_id = response_json["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Thread ID not found in response"))?
+        .to_string();
     log::info!("Created new thread with ID: {}", thread_id);
     Ok(thread_id)
 }
 
 pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
+    let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql"; // Your assistant ID
 
     let json_payload = serde_json::json!({
+        "assistant_id": assistant_id,  // Include the assistant ID in the message payload
         "role": "user",
         "content": message
     });
