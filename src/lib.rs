@@ -103,14 +103,12 @@ pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
 
 pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
-    let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql"; // Your assistant ID
 
     let response = client.post("https://api.openai.com/v1/threads")
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
         .header("OpenAI-Beta", "assistants=v2")
         .json(&serde_json::json!({
-            "assistant_id": assistant_id,  // Include the assistant ID in the creation payload
             "messages": [{"role": "user", "content": initial_message}]
         }))
         .send()
