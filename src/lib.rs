@@ -127,7 +127,10 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: 
     let client = reqwest::Client::new();
 
     let json_payload = serde_json::json!({
-        "messages": [{"role": "user", "content": message}],
+        "message": { 
+            "role": "user", 
+            "content": message 
+        }
     });
 
     log::info!("send_message_to_thread payload: {}", json_payload);
@@ -146,7 +149,8 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: 
     let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
     let response_content = response_json.get("choices")
         .and_then(|choices| choices.get(0))
-        .and_then(|choice| choice["message"].get("content"))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
         .and_then(|content| content.as_str())
         .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
         .to_string();
