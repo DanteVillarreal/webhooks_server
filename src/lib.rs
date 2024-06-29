@@ -166,7 +166,7 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
 
     log::info!("send_message_to_thread payload: {}", json_payload);
 
-    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/runs/{}/messages", thread_id, run_id))
+    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/runs/", thread_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
         .header("OpenAI-Beta", "assistants=v2")
