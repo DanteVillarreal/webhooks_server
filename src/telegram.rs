@@ -70,7 +70,7 @@ pub async fn run_telegram_bot() {
     let bot = Bot::from_env();
     log::info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
-    let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string(); // Your assistant ID as a String
+    let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
 
     teloxide::repl(bot.clone(), move |message: Message, bot: Bot| {
         let openai_key = openai_key.clone();
@@ -112,7 +112,7 @@ pub async fn run_telegram_bot() {
                     };
 
                     // Create a new run on the thread with the assistant
-                    let run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await { // Removed text from parameters
+                    let run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await {
                         Ok(run_id) => run_id,
                         Err(e) => {
                             log::error!("Failed to create run: {}", e);
@@ -127,7 +127,7 @@ pub async fn run_telegram_bot() {
                 };
 
                 // Send message within the run in the thread
-                match send_message_to_thread(&openai_key, &thread_id, &run_id, text).await {
+                match send_message_to_thread(&openai_key, &thread_id, text, &assistant_id).await {
                     Ok(response) => {
                         bot.send_message(message.chat.id, response).await?;
                     }

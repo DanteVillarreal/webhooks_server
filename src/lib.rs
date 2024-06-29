@@ -156,40 +156,57 @@ pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, assistant_i
     Ok(run_id)
 }
 
-pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &str, message: &str) -> anyhow::Result<String> {
+pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: &str, assistant_id: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
 
     let json_payload = serde_json::json!({
         "role": "user",
-        "content": message
+        "content": message,
+        "assistant_id": assistant_id  // Including the assistant_id in the payload
     });
 
     log::info!("send_message_to_thread payload: {}", json_payload);
 
-    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages/", thread_id))
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", openai_key))
-        .header("OpenAI-Beta", "assistants=v2")
-        .json(&json_payload)
-        .send()
-        .await?;
+    // Retry logic added
+    for attempt in 0..3 {
+        let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", openai_key))
+            .header("OpenAI-Beta", "assistants=v2")
+            .json(&json_payload)
+            .send()
+            .await?;
 
-    let response_text = response.text().await?;
-    log::info!("Received response from send_message_to_thread: {}", response_text);
+        let response_text = response.text().await?;
+        log::info!("Received response from send_message_to_thread: {}", response_text);
 
-    let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
+        let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
 
-    // Extract the content text
-    let response_content = response_json["content"]
-        .as_array()
-        .and_then(|content_array| content_array.get(0))
-        .and_then(|content| content.get("text"))
-        .and_then(|text| text.get("value"))
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
-        .to_string();
+        // If we get the specific error about active run, retry after a short delay
+        if let Some(error) = response_json.get("error") {
+            let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("");
+            if message.contains("while a run") && message.contains("is active") {
+                log::warn!("Active run detected, retrying... Attempt {}", attempt + 1);
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                continue;
+            }
+        }
 
-    log::info!("lib.rs: Sent message to thread ID: {}, response: {}", thread_id, response_content);
+        // No retry needed, proceed normally
+        let response_content = response_json["content"]
+            .as_array()
+            .and_then(|content_array| content_array.get(0))
+            .and_then(|content| content.get("text"))
+            .and_then(|text| text.get("value"))
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
+            .to_string();
 
-    Ok(response_content)
+        log::info!("lib.rs: Sent message to thread ID: {}, response: {}", thread_id, response_content);
+
+        return Ok(response_content);
+    }
+
+    // If all retries failed, return error
+    Err(anyhow::anyhow!("Failed to send message after multiple attempts due to active run"))
 }
