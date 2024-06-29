@@ -129,13 +129,17 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: 
     let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
+        .header("OpenAI-Beta", "assistants=v2")
         .json(&serde_json::json!({
             "messages": [{"role": "user", "content": message}],
         }))
         .send()
         .await?;
 
-    let response_json: serde_json::Value = response.json().await?;
+    let response_text = response.text().await?;
+    log::info!("Received response from send_message_to_thread: {}", response_text);
+
+    let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
     let response_content = response_json["choices"][0]["message"]["content"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
