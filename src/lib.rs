@@ -140,8 +140,10 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: 
     log::info!("Received response from send_message_to_thread: {}", response_text);
 
     let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
-    let response_content = response_json["choices"][0]["message"]["content"]
-        .as_str()
+    let response_content = response_json.get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice["message"].get("content"))
+        .and_then(|content| content.as_str())
         .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
         .to_string();
     log::info!("lib.rs: Sent message to thread ID: {}, response: {}", thread_id, response_content);
