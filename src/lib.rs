@@ -127,10 +127,8 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: 
     let client = reqwest::Client::new();
 
     let json_payload = serde_json::json!({
-        "message": { 
-            "role": "user", 
-            "content": message 
-        }
+        "role": "user", 
+        "content": message 
     });
 
     log::info!("send_message_to_thread payload: {}", json_payload);
