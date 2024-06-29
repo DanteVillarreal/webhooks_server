@@ -126,13 +126,17 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
 pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
 
+    let json_payload = serde_json::json!({
+        "messages": [{"role": "user", "content": message}],
+    });
+
+    log::info!("send_message_to_thread payload: {}", json_payload);
+
     let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
         .header("OpenAI-Beta", "assistants=v2")
-        .json(&serde_json::json!({
-            "messages": [{"role": "user", "content": message}],
-        }))
+        .json(&json_payload)
         .send()
         .await?;
 
