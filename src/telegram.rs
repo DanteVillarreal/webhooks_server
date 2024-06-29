@@ -112,7 +112,7 @@ pub async fn run_telegram_bot() {
                     };
 
                     // Create a new run on the thread with the assistant
-                    let run_id = match create_run_on_thread(&openai_key, &thread_id, text, &assistant_id).await {
+                    let run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await { // Removed text from parameters
                         Ok(run_id) => run_id,
                         Err(e) => {
                             log::error!("Failed to create run: {}", e);

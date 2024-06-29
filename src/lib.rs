@@ -126,13 +126,12 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
     Ok(thread_id)
 }
 
-pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, initial_message: &str, assistant_id: &str) -> anyhow::Result<String> {
+pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, assistant_id: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
 
-    // Assuming the correct payload structure
+    // Payload with only assistant_id
     let json_payload = serde_json::json!({
-        "assistant_id": assistant_id,
-        "input": initial_message // Updated key from "messages" to "input"
+        "assistant_id": assistant_id
     });
 
     log::info!("create_run_on_thread payload: {}", json_payload);
