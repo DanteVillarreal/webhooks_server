@@ -156,18 +156,17 @@ pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, assistant_i
     Ok(run_id)
 }
 
-pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: &str, assistant_id: &str) -> anyhow::Result<String> {
+pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &str, message: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
 
     let json_payload = serde_json::json!({
         "role": "user",
-        "content": message,
-        "assistant_id": assistant_id  // Including the assistant_id in the payload
+        "content": message
     });
 
     log::info!("send_message_to_thread payload: {}", json_payload);
 
-    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id)) // Corrected URL pattern
+    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages/", thread_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
         .header("OpenAI-Beta", "assistants=v2")
