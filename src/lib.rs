@@ -126,19 +126,47 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
     Ok(thread_id)
 }
 
-pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: &str) -> anyhow::Result<String> {
+pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, initial_message: &str, assistant_id: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
-    let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql"; // Your assistant ID
 
     let json_payload = serde_json::json!({
-        "assistant_id": assistant_id,  // Include the assistant ID in the message payload
+        "assistant_id": assistant_id,
+        "messages": [{"role": "user", "content": initial_message}]
+    });
+
+    log::info!("create_run_on_thread payload: {}", json_payload);
+
+    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/runs", thread_id))
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .header("OpenAI-Beta", "assistants=v2")
+        .json(&json_payload)
+        .send()
+        .await?;
+
+    let response_text = response.text().await?;
+    log::info!("Received response from create_run_on_thread: {}", response_text);
+
+    let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
+    let run_id = response_json["id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Run ID not found in response"))?
+        .to_string();
+    log::info!("Created new run with ID: {}", run_id);
+    Ok(run_id)
+}
+
+pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &str, message: &str) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+
+    let json_payload = serde_json::json!({
         "role": "user",
         "content": message
     });
 
     log::info!("send_message_to_thread payload: {}", json_payload);
 
-    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/runs/{}/messages", thread_id, run_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
         .header("OpenAI-Beta", "assistants=v2")

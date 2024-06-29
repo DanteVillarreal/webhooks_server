@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::{call_openai_api, send_message_to_thread, create_openai_thread};
+use crate::{call_openai_api, send_message_to_thread, create_openai_thread, create_run_on_thread};
 use anyhow::anyhow;
 
 
@@ -61,7 +61,7 @@ use anyhow::anyhow;
 
 // Global HashMap to store user_id to thread_id mappings
 lazy_static::lazy_static! {
-    static ref USER_THREADS: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    static ref USER_THREADS: Arc<Mutex<HashMap<u64, (String, String)>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
 use log::{info, error}; // Import logging macros
@@ -70,9 +70,12 @@ pub async fn run_telegram_bot() {
     let bot = Bot::from_env();
     log::info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
+    let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string(); // Your assistant ID as a String
 
     teloxide::repl(bot.clone(), move |message: Message, bot: Bot| {
         let openai_key = openai_key.clone();
+        let assistant_id = assistant_id.clone();
+
         async move {
             if let Some(text) = message.text() {
                 log::info!("Received message: {}", text);
@@ -83,7 +86,7 @@ pub async fn run_telegram_bot() {
                         message.chat.id,
                         text
                     ));
-                
+
                 let user_id = match user_id {
                     Ok(id) => id,
                     Err(err) => {
@@ -95,25 +98,36 @@ pub async fn run_telegram_bot() {
                 // Lock the global HashMap for thread safety
                 let mut user_threads = USER_THREADS.lock().await;
 
-                let thread_id = if let Some(thread_id) = user_threads.get(&user_id) {
-                    thread_id.to_string()
+                let (thread_id, run_id) = if let Some((thread_id, run_id)) = user_threads.get(&user_id) {
+                    (thread_id.clone(), run_id.clone())
                 } else {
                     // Create a new thread
-                    match create_openai_thread(&openai_key, text).await {
-                        Ok(thread_id) => {
-                            user_threads.insert(user_id, thread_id.clone());
-                            thread_id
-                        }
+                    let thread_id = match create_openai_thread(&openai_key, text).await {
+                        Ok(thread_id) => thread_id,
                         Err(e) => {
                             log::error!("Failed to create thread: {}", e);
                             bot.send_message(message.chat.id, "Failed to create thread. Please try again later.").await?;
                             return respond(());
                         }
-                    }
+                    };
+
+                    // Create a new run on the thread with the assistant
+                    let run_id = match create_run_on_thread(&openai_key, &thread_id, text, &assistant_id).await {
+                        Ok(run_id) => run_id,
+                        Err(e) => {
+                            log::error!("Failed to create run: {}", e);
+                            bot.send_message(message.chat.id, "Failed to create run. Please try again later.").await?;
+                            return respond(());
+                        }
+                    };
+
+                    // Store both thread_id and run_id in the map
+                    user_threads.insert(user_id, (thread_id.clone(), run_id.clone()));
+                    (thread_id, run_id)
                 };
 
-                // Send message to the thread
-                match send_message_to_thread(&openai_key, &thread_id, text).await {
+                // Send message within the run in the thread
+                match send_message_to_thread(&openai_key, &thread_id, &run_id, text).await {
                     Ok(response) => {
                         bot.send_message(message.chat.id, response).await?;
                     }
@@ -121,12 +135,11 @@ pub async fn run_telegram_bot() {
                         log::error!("Error sending message to thread: {}", e);
                         bot.send_message(message.chat.id, "Failed to send message. Please try again later.").await?;
                     }
-                }
+                };
             }
             respond(())
         }
-    })
-    .await;
+    }).await;
 }
 
 
