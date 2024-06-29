@@ -107,6 +107,7 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
     let response = client.post("https://api.openai.com/v1/threads")
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
+        .header("OpenAI-Beta", "assistants=v2")
         .json(&serde_json::json!({
             "messages": [ {"role": "user", "content": initial_message} ],
         }))
