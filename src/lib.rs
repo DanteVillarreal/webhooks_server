@@ -162,7 +162,7 @@ pub async fn is_run_active(openai_key: &str, thread_id: &str, run_id: &str) -> a
 
     let response = client.get(&url)
         .header("Authorization", format!("Bearer {}", openai_key))
-        .header("OpenAI-Beta", "assistants=v2") // Added the missing header
+        .header("OpenAI-Beta", "assistants=v2")
         .send()
         .await?;
 
@@ -173,7 +173,7 @@ pub async fn is_run_active(openai_key: &str, thread_id: &str, run_id: &str) -> a
 
     let status = response_json["status"].as_str().unwrap_or("");
     
-    Ok(status == "queued" || status == "started")
+    Ok(status == "queued" || status == "started" || status == "in_progress")
 }
 
 
