@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::{call_openai_api, send_message_to_thread, create_openai_thread, create_run_on_thread};
+use crate::{call_openai_api, send_message_to_thread, create_openai_thread, create_run_on_thread, send_next_message};
 use anyhow::anyhow;
 
 
@@ -132,6 +132,7 @@ pub async fn run_telegram_bot() {
                 //So everytime I need to send a message, I need to create another run.
                 if sentinel_value == 0 {
                     //aka if it hasn't already made a run on the same message, then make a run
+                    let _good = send_next_message(&thread_id, text);
                     run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await {
                         Ok(run_id) => run_id,
                         Err(e) => {

@@ -269,3 +269,23 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
     Err(anyhow::anyhow!("Failed to send message after multiple attempts due to active run"))
 }
 
+pub async fn send_next_message(thread_id: &str, text: &str) -> anyhow::Result<()> {
+    let client = Client::new();
+    log::info!("message we're about to send: {}", text);
+    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+        .header("Content-Type", "application/json")
+        .header("Authorization", "Bearer YOUR_OPEN_AI_KEY")
+        .body(serde_json::json!({
+            "role": "user",
+            "content": text
+        }).to_string())
+        .send()
+        .await?;
+    let response_text = response.text().await?;
+    
+    log::info!("response from POST https://api.openai.com/v1/threads/{thread_id}/messages:
+    {}", response_text);
+
+    Ok(())
+}
+
