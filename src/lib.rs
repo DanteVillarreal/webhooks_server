@@ -195,6 +195,7 @@ pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> an
     // Iterate over the messages in reverse to find the last assistant message
     let messages = response_json["messages"].as_array().ok_or_else(|| anyhow::anyhow!("Messages array not found"))?;
     for message in messages.iter().rev() {
+        log::info!("SEEING IF THIS IS READ");
         if message["role"] == "assistant" {
             // Return the assistant's message content
             log::info!("found the assistant's message!");
