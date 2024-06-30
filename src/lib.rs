@@ -162,6 +162,7 @@ pub async fn is_run_active(openai_key: &str, thread_id: &str, run_id: &str) -> a
 
     let response = client.get(&url)
         .header("Authorization", format!("Bearer {}", openai_key))
+        .header("OpenAI-Beta", "assistants=v2") // Added the missing header
         .send()
         .await?;
 
