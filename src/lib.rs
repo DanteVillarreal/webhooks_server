@@ -197,10 +197,11 @@ pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> an
     for message in messages.iter().rev() {
         if message["role"] == "assistant" {
             // Return the assistant's message content
+            log::info!("found the assistant's message!");
             return Ok(message["content"][0]["text"]["value"].as_str().unwrap_or("").to_string());
         }
     }
-
+    log::error!("didn't find the asisstant's message");
     Ok("No assistant response found".to_string())
 }
 
