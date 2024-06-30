@@ -178,6 +178,32 @@ pub async fn is_run_active(openai_key: &str, thread_id: &str, run_id: &str) -> a
 
 
 
+pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> anyhow::Result<String> {
+    let client = reqwest::Client::new();
+    let response = client.get(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .send()
+        .await?;
+
+    let response_text = response.text().await?;
+    log::info!("Received response from get_last_assistant_message: {}", response_text);
+
+    let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
+
+    // Iterate over the messages in reverse to find the last assistant message
+    let messages = response_json["messages"].as_array().ok_or_else(|| anyhow::anyhow!("Messages array not found"))?;
+    for message in messages.iter().rev() {
+        if message["role"] == "assistant" {
+            // Return the assistant's message content
+            return Ok(message["content"][0]["text"]["value"].as_str().unwrap_or("").to_string());
+        }
+    }
+
+    Ok("No assistant response found".to_string())
+}
+
+
 pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &str, message: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
 
@@ -197,7 +223,8 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             continue;
         }
-        
+
+        // Send user message
         let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
             .header("Content-Type", "application/json")
             .header("Authorization", format!("Bearer {}", openai_key))
@@ -211,21 +238,12 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
 
         let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
 
-        // No retry needed, proceed normally
-        let response_content = response_json["content"]
-            .as_array()
-            .and_then(|content_array| content_array.get(0))
-            .and_then(|content| content.get("text"))
-            .and_then(|text| text.get("value"))
-            .and_then(|value| value.as_str())
-            .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
-            .to_string();
-
-        log::info!("lib.rs: Sent message to thread ID: {}, response: {}", thread_id, response_content);
-
-        return Ok(response_content);
+        // Now fetch the assistant's response
+        let assistant_response = get_last_assistant_message(openai_key, thread_id).await?;
+        return Ok(assistant_response);
     }
 
     // If all retries failed, return error
     Err(anyhow::anyhow!("Failed to send message after multiple attempts due to active run"))
 }
+
