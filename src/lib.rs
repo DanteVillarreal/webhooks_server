@@ -183,6 +183,7 @@ pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> an
     let response = client.get(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
+        .header("OpenAI-Beta", "assistants=v2") // Added the missing header
         .send()
         .await?;
 
@@ -239,8 +240,10 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
         let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
 
         // Now fetch the assistant's response
-        let assistant_response = get_last_assistant_message(openai_key, thread_id).await?;
-        return Ok(assistant_response);
+        match get_last_assistant_message(openai_key, thread_id).await {
+            Ok(assistant_response) => return Ok(assistant_response),
+            Err(e) => log::error!("Error getting last assistant message: {:?}", e),
+        };
     }
 
     // If all retries failed, return error
