@@ -192,18 +192,35 @@ pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> an
 
     let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
 
-    // Iterate over the messages in reverse to find the last assistant message
-    let messages = response_json["messages"].as_array().ok_or_else(|| anyhow::anyhow!("Messages array not found"))?;
-    for message in messages.iter().rev() {
-        log::info!("SEEING IF THIS IS READ");
-        if message["role"] == "assistant" {
-            // Return the assistant's message content
-            log::info!("found the assistant's message!");
-            return Ok(message["content"][0]["text"]["value"].as_str().unwrap_or("").to_string());
-        }
+    // Extract the data array
+    let data = response_json["data"].as_array().unwrap();
+    // Filter out the assistant's messages
+    let assistant_messages: Vec<&serde_json::Value> = data.iter().filter(|msg| msg["role"].as_str() == Some("assistant")).collect();
+    // Extract the content text of the assistant's messages
+    let assistant_texts: Vec<String> = assistant_messages.iter().map(|msg| {
+        msg["content"][0]["text"]["value"].as_str().unwrap().to_string()
+    }).collect();
+    if let Some(last_message) = assistant_texts.last() {
+        log::info!("The last message from the assistant is: {}", last_message);
+        Ok(last_message.to_string())
+    } else {
+        log::error!("The assistant has not sent any messages.");
+        Ok("No assistant response found".to_string())
     }
-    log::error!("didn't find the asisstant's message");
-    Ok("No assistant response found".to_string())
+    
+
+    // // Iterate over the messages in reverse to find the last assistant message
+    // let messages = response_json["messages"].as_array().ok_or_else(|| anyhow::anyhow!("Messages array not found"))?;
+    // for message in messages.iter().rev() {
+    //     log::info!("SEEING IF THIS IS READ");
+    //     if message["role"] == "assistant" {
+    //         // Return the assistant's message content
+    //         log::info!("found the assistant's message!");
+    //         return Ok(message["content"][0]["text"]["value"].as_str().unwrap_or("").to_string());
+    //     }
+    // }
+    // log::error!("didn't find the asisstant's message");
+    // Ok("No assistant response found".to_string())
 }
 
 
