@@ -156,7 +156,28 @@ pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, assistant_i
     Ok(run_id)
 }
 
-pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: &str) -> anyhow::Result<String> {
+pub async fn is_run_active(openai_key: &str, thread_id: &str, run_id: &str) -> anyhow::Result<bool> {
+    let client = reqwest::Client::new();
+    let url = format!("https://api.openai.com/v1/threads/{}/runs/{}", thread_id, run_id);
+
+    let response = client.get(&url)
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .send()
+        .await?;
+
+    let response_text = response.text().await?;
+    log::info!("Received response from is_run_active: {}", response_text);
+
+    let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
+
+    let status = response_json["status"].as_str().unwrap_or("");
+    
+    Ok(status == "queued" || status == "started")
+}
+
+
+
+pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &str, message: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
 
     let json_payload = serde_json::json!({
@@ -166,30 +187,44 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, message: 
 
     log::info!("send_message_to_thread payload: {}", json_payload);
 
-    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", openai_key))
-        .header("OpenAI-Beta", "assistants=v2")
-        .json(&json_payload)
-        .send()
-        .await?;
+    // Retry logic added
+    const MAX_RETRIES: u32 = 5;
+    for attempt in 0..MAX_RETRIES {
+        // Check if the run is active
+        if is_run_active(openai_key, thread_id, run_id).await? {
+            log::warn!("Active run detected, retrying... Attempt {}", attempt + 1);
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            continue;
+        }
+        
+        let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", openai_key))
+            .header("OpenAI-Beta", "assistants=v2")
+            .json(&json_payload)
+            .send()
+            .await?;
 
-    let response_text = response.text().await?;
-    log::info!("Received response from send_message_to_thread: {}", response_text);
+        let response_text = response.text().await?;
+        log::info!("Received response from send_message_to_thread: {}", response_text);
 
-    let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
+        let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
 
-    // Extract the content text
-    let response_content = response_json["content"]
-        .as_array()
-        .and_then(|content_array| content_array.get(0))
-        .and_then(|content| content.get("text"))
-        .and_then(|text| text.get("value"))
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
-        .to_string();
+        // No retry needed, proceed normally
+        let response_content = response_json["content"]
+            .as_array()
+            .and_then(|content_array| content_array.get(0))
+            .and_then(|content| content.get("text"))
+            .and_then(|text| text.get("value"))
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Response content not found in response"))?
+            .to_string();
 
-    log::info!("lib.rs: Sent message to thread ID: {}, response: {}", thread_id, response_content);
+        log::info!("lib.rs: Sent message to thread ID: {}, response: {}", thread_id, response_content);
 
-    Ok(response_content)
+        return Ok(response_content);
+    }
+
+    // If all retries failed, return error
+    Err(anyhow::anyhow!("Failed to send message after multiple attempts due to active run"))
 }

@@ -127,7 +127,7 @@ pub async fn run_telegram_bot() {
                 };
 
                 // Send message within the run in the thread
-                match send_message_to_thread(&openai_key, &thread_id, text).await { // Removed assistant_id from arguments
+                match send_message_to_thread(&openai_key, &thread_id, &run_id, text).await {
                     Ok(response) => {
                         bot.send_message(message.chat.id, response).await?;
                     }
