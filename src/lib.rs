@@ -115,6 +115,7 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
         .await?;
 
     let response_text = response.text().await?;
+    log::info!("Step 2 initiating. aka POST https://api.openai.com/v1/threads");
     log::info!("Received response from create_openai_thread: {}", response_text);
 
     let response_json = serde_json::from_str::<serde_json::Value>(&response_text)?;
@@ -123,6 +124,7 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
         .ok_or_else(|| anyhow::anyhow!("Thread ID not found in response"))?
         .to_string();
     log::info!("Created new thread with ID: {}", thread_id);
+    log::info!("Step 2 complete");
     Ok(thread_id)
 }
 
@@ -145,6 +147,7 @@ pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, assistant_i
         .await?;
 
     let response_text = response.text().await?;
+    log::info!("Step 4 starting. aka POST https://api.openai.com/v1/threads/{thread_id}/runs");
     log::info!("Received response from create_run_on_thread: {}", response_text);
 
     let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
@@ -153,12 +156,16 @@ pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, assistant_i
         .ok_or_else(|| anyhow::anyhow!("Run ID not found in response"))?
         .to_string();
     log::info!("Created new run with ID: {}", run_id);
+    log::info!("Step 4 complete");
     Ok(run_id)
 }
 
 pub async fn is_run_active(openai_key: &str, thread_id: &str, run_id: &str) -> anyhow::Result<bool> {
     let client = reqwest::Client::new();
     let url = format!("https://api.openai.com/v1/threads/{}/runs/{}", thread_id, run_id);
+
+    log::info!("Step 5 initiating. Aka Checking run's status to see if it's done");
+    log::info!("AKA GET https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}");
 
     let response = client.get(&url)
         .header("Authorization", format!("Bearer {}", openai_key))
@@ -180,6 +187,10 @@ pub async fn is_run_active(openai_key: &str, thread_id: &str, run_id: &str) -> a
 
 pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
+
+    log::info!("Step 6 initiating. Aka: Retrieve the assistant's response");
+    log::info!("AKA: GET https://api.openai.com/v1/threads/{thread_id}/messages");
+
     let response = client.get(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
@@ -188,6 +199,7 @@ pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> an
         .await?;
 
     let response_text = response.text().await?;
+    log::info!("Step 6 complete.");
     log::info!("Received response from get_last_assistant_message: {}", response_text);
 
     let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
@@ -243,7 +255,9 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             continue;
         }
-
+        log::info!("Step 5 complete. AKA run status has been checked. NOT ACTIVE\n");
+        log::info!("Step 3 initiating. Adding a Users' message to the thread.");
+        log::info!("Aka POST https://api.openai.com/v1/threads/{thread_id}/messages");
         // Send user message
         let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
             .header("Content-Type", "application/json")
@@ -254,7 +268,9 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
             .await?;
 
         let response_text = response.text().await?;
+
         log::info!("Received response from send_message_to_thread: {}", response_text);
+        log::info!("Step 3 complete");
 
         let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
 
@@ -271,7 +287,11 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
 
 pub async fn send_next_message(thread_id: &str, text: &str) -> anyhow::Result<()> {
     let client = Client::new();
-    log::info!("message we're about to send: {}", text);
+
+    log::info!("message we're about to send: {}\n", text);
+    log::info!("Step 3 initiating. AKA: Add a user's message to the thread");
+    log::info!("AKA: POST https://api.openai.com/v1/threads/{thread_id}/messages");
+
     let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
         .header("Content-Type", "application/json")
         .header("Authorization", "Bearer YOUR_OPEN_AI_KEY")
@@ -283,6 +303,7 @@ pub async fn send_next_message(thread_id: &str, text: &str) -> anyhow::Result<()
         .await?;
     let response_text = response.text().await?;
     
+    log::info!("Step 3 complete");
     log::info!("response from POST https://api.openai.com/v1/threads/{thread_id}/messages:
     {}", response_text);
 
