@@ -286,7 +286,7 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
 }
 
 pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> anyhow::Result<String> {
-
+    log::info!("got to first_loop");
     let thread_id = match create_openai_thread(&openai_key, message).await {
         Ok(thread_id) => thread_id,
         Err(e) => {
