@@ -80,21 +80,21 @@ pub async fn run_telegram_bot() {
             if let Some(text) = message.text() {
                 let mut sentinel_value = 0;
                 log::info!("Received message: {}", text);
-                let user_id: anyhow::Result<u64> = message.from()
-                    .map(|user| user.id.0)
-                    .ok_or_else(|| anyhow!(
-                        "User not found in the incoming message. Message details: chat_id={}, text={}",
-                        message.chat.id,
-                        text
-                    ));
+                // let user_id: anyhow::Result<u64> = message.from()
+                //     .map(|user| user.id.0)
+                //     .ok_or_else(|| anyhow!(
+                //         "User not found in the incoming message. Message details: chat_id={}, text={}",
+                //         message.chat.id,
+                //         text
+                //     ));
 
-                let user_id = match user_id {
-                    Ok(id) => id,
-                    Err(err) => {
-                        bot.send_message(message.chat.id, err.to_string()).await?;
-                        return respond(());
-                    }
-                };
+                // let user_id = match user_id {
+                //     Ok(id) => id,
+                //     Err(err) => {
+                //         bot.send_message(message.chat.id, err.to_string()).await?;
+                //         return respond(());
+                //     }
+                // };
                 let unused_var = first_loop(&openai_key, text, &assistant_id);
                 // // Lock the global HashMap for thread safety
                 // let mut user_threads = USER_THREADS.lock().await;
