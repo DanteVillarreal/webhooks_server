@@ -135,7 +135,7 @@ pub async fn create_run_on_thread(openai_key: &str, thread_id: &str, assistant_i
     let json_payload = serde_json::json!({
         "assistant_id": assistant_id
     });
-
+    log::info!("Now in step 4's function: create_run_on_thread");
     log::info!("create_run_on_thread payload: {}", json_payload);
 
     let response = client.post(&format!("https://api.openai.com/v1/threads/{}/runs", thread_id))
@@ -287,6 +287,9 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
 
 pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> anyhow::Result<String> {
     log::info!("got to first_loop");
+    log::info!("Step 2 should be starting soon.");
+    log::info!("Since I am already adding the message to the json_payload in step 2,");
+    log::info!("Step 3 is completed when the response from step 2 is received");
     let thread_id = match create_openai_thread(&openai_key, message).await {
         Ok(thread_id) => thread_id,
         Err(e) => {
@@ -302,20 +305,20 @@ pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> 
         "content": message
     });
 
-    log::info!("Step 3 initializing: aka add a user's message to the thread");
-    log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/messages");
+    // log::info!("Step 3 initializing: aka add a user's message to the thread");
+    // log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/messages");
 
-    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
-    .header("Content-Type", "application/json")
-    .header("Authorization", format!("Bearer {}", openai_key))
-    .header("OpenAI-Beta", "assistants=v2")
-    .json(&json_payload)
-    .send()
-    .await?;
+    // let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+    // .header("Content-Type", "application/json")
+    // .header("Authorization", format!("Bearer {}", openai_key))
+    // .header("OpenAI-Beta", "assistants=v2")
+    // .json(&json_payload)
+    // .send()
+    // .await?;
 
-    let response_text = response.text().await?;
-    log::info!("Step 3 complete");
-    log::info!("Received response from add a user's message to the thread: {}", response_text);
+    // let response_text = response.text().await?;
+    // log::info!("Step 3 complete");
+    // log::info!("Received response from add a user's message to the thread: {}", response_text);
 
     log::info!("Step 4 initializing. aka Run the assistant");
     log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/runs");
@@ -347,7 +350,7 @@ pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> 
     log::info!("Step 6 should be starting soon");
     match get_last_assistant_message(openai_key, &thread_id).await {
         Ok(response) => {
-            log::info!("The last message from the assistant is: {}", response);
+            //log::info!("The last message from the assistant is: {}", response);
             Ok(response)
         },
         Err(e) => {
