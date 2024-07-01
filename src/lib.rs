@@ -285,6 +285,74 @@ pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &
     Err(anyhow::anyhow!("Failed to send message after multiple attempts due to active run"))
 }
 
+pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> anyhow::Result<String> {
+
+    let thread_id = match create_openai_thread(&openai_key, message).await {
+        Ok(thread_id) => thread_id,
+        Err(e) => {
+            log::error!("Failed to create thread: {}", e);
+            let no_makey = "could not makey thread";
+            no_makey.to_string()
+        }
+    };
+    let client = reqwest::Client::new();
+
+    let json_payload = serde_json::json!({
+        "role": "user",
+        "content": message
+    });
+
+    log::info!("Step 3 initializing: aka add a user's message to the thread");
+    log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/messages");
+
+    let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+    .header("Content-Type", "application/json")
+    .header("Authorization", format!("Bearer {}", openai_key))
+    .header("OpenAI-Beta", "assistants=v2")
+    .json(&json_payload)
+    .send()
+    .await?;
+
+    let response_text = response.text().await?;
+    log::info!("Step 3 complete");
+    log::info!("Received response from send_message_to_thread: {}", response_text);
+
+    log::info!("Step 4 initializing. aka Run the assistant");
+    log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/runs");
+
+    let run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await {
+        Ok(run_id) => run_id,
+        Err(e) => {
+            log::error!("Failed to create run: {}", e);
+            let no_run = "couldn't make run";
+            no_run.to_string()
+        }
+    };
+
+    const MAX_RETRIES: u32 = 5;
+    for attempt in 0..MAX_RETRIES {
+        // Check if the run is active
+        log::info!("Step 5 shoudl be starting soon");
+        if is_run_active(openai_key, &thread_id, &run_id).await? {
+            log::warn!("Active run detected, retrying... Attempt {}", attempt + 1);
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            //continue to next iteration of for loop
+            continue;
+        }
+        else {
+            //break out of of for loop
+            break;
+        }
+    }
+    log::info!("Step 6 should be starting soon");
+    let get_last = get_last_assistant_message(openai_key, &thread_id);
+
+    let we_did_it = "Success";
+    Ok(we_did_it.to_string())
+}
+
+
+
 pub async fn send_next_message(thread_id: &str, text: &str) -> anyhow::Result<()> {
     let client = Client::new();
 
