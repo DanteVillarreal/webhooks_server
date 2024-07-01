@@ -95,6 +95,7 @@ pub async fn run_telegram_bot() {
                 //         return respond(());
                 //     }
                 // };
+                log::info!("idk hello");
                 let unused_var = first_loop(&openai_key, text, &assistant_id);
                 // // Lock the global HashMap for thread safety
                 // let mut user_threads = USER_THREADS.lock().await;
