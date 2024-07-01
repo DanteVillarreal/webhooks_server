@@ -68,7 +68,7 @@ use log::{info, error}; // Import logging macros
 
 pub async fn run_telegram_bot() {
     let bot = Bot::from_env();
-    log::info!("Bot started");
+    info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
     let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
 
@@ -78,86 +78,121 @@ pub async fn run_telegram_bot() {
 
         async move {
             if let Some(text) = message.text() {
-                let mut sentinel_value = 0;
-                log::info!("Received message: {}", text);
-                // let user_id: anyhow::Result<u64> = message.from()
-                //     .map(|user| user.id.0)
-                //     .ok_or_else(|| anyhow!(
-                //         "User not found in the incoming message. Message details: chat_id={}, text={}",
-                //         message.chat.id,
-                //         text
-                //     ));
+                info!("Received message: {}", text);
 
-                // let user_id = match user_id {
-                //     Ok(id) => id,
-                //     Err(err) => {
-                //         bot.send_message(message.chat.id, err.to_string()).await?;
-                //         return respond(());
-                //     }
-                // };
-                log::info!("idk hello");
-                let unused_var = first_loop(&openai_key, text, &assistant_id);
-                // // Lock the global HashMap for thread safety
-                // let mut user_threads = USER_THREADS.lock().await;
+                // Use first_loop to handle the OpenAI interactions
+                let response = match first_loop(&openai_key, text, &assistant_id).await {
+                    Ok(response) => response,
+                    Err(e) => {
+                        log::error!("Failed to process message: {}", e);
+                        "Failed to process message. Please try again later.".to_string()
+                    }
+                };
 
-                // let (thread_id, mut run_id) = if let Some((thread_id, run_id)) = user_threads.get(&user_id) {
-                //     (thread_id.clone(), run_id.clone())
-                // } else {
-                //     sentinel_value = 1;
-                //     // Create a new thread
-                //     let thread_id = match create_openai_thread(&openai_key, text).await {
-                //         Ok(thread_id) => thread_id,
-                //         Err(e) => {
-                //             log::error!("Failed to create thread: {}", e);
-                //             bot.send_message(message.chat.id, "Failed to create thread. Please try again later.").await?;
-                //             return respond(());
-                //         }
-                //     };
-
-                //     // Create a new run on the thread with the assistant
-                //     let run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await {
-                //         Ok(run_id) => run_id,
-                //         Err(e) => {
-                //             log::error!("Failed to create run: {}", e);
-                //             bot.send_message(message.chat.id, "Failed to create run. Please try again later.").await?;
-                //             return respond(());
-                //         }
-                //     };
-
-                //     // Store both thread_id and run_id in the map
-                //     user_threads.insert(user_id, (thread_id.clone(), run_id.clone()));
-                //     (thread_id, run_id)
-                // };
-                // // //A run is just a fucking "process message". that's it. 
-                // // //I dont think we even need a hashmap of pairs of threads and runs
-                // // //So everytime I need to send a message, I need to create another run.
-                // // if sentinel_value == 0 {
-                // //     //aka if it hasn't already made a run on the same message, then make a run
-                // //     let _good = send_next_message(&thread_id, text);
-                // //     run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await {
-                // //         Ok(run_id) => run_id,
-                // //         Err(e) => {
-                // //             log::error!("Failed to create run: {}", e);
-                // //             bot.send_message(message.chat.id, "Failed to create run. Please try again later.").await?;
-                // //             return respond(());
-                // //         }
-                // //     };
-                // // }
-                // // Send message within the run in the thread
-                // match send_message_to_thread(&openai_key, &thread_id, &run_id, text).await {
-                //     Ok(response) => {
-                //         bot.send_message(message.chat.id, response).await?;
-                //     }
-                //     Err(e) => {
-                //         log::error!("Error sending message to thread: {}", e);
-                //         bot.send_message(message.chat.id, "Failed to send message. Please try again later.").await?;
-                //     }
-                // };
+                // Send the response back to the user
+                if let Err(e) = bot.send_message(message.chat.id, response).await {
+                    log::error!("Failed to send message to Telegram: {}", e);
+                }
             }
             respond(())
         }
     }).await;
 }
+
+
+
+// pub async fn run_telegram_bot() {
+//     let bot = Bot::from_env();
+//     log::info!("Bot started");
+//     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
+//     let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
+
+//     teloxide::repl(bot.clone(), move |message: Message, bot: Bot| {
+//         let openai_key = openai_key.clone();
+//         let assistant_id = assistant_id.clone();
+
+//         async move {
+//             if let Some(text) = message.text() {
+//                 let mut sentinel_value = 0;
+//                 log::info!("Received message: {}", text);
+//                 // let user_id: anyhow::Result<u64> = message.from()
+//                 //     .map(|user| user.id.0)
+//                 //     .ok_or_else(|| anyhow!(
+//                 //         "User not found in the incoming message. Message details: chat_id={}, text={}",
+//                 //         message.chat.id,
+//                 //         text
+//                 //     ));
+
+//                 // let user_id = match user_id {
+//                 //     Ok(id) => id,
+//                 //     Err(err) => {
+//                 //         bot.send_message(message.chat.id, err.to_string()).await?;
+//                 //         return respond(());
+//                 //     }
+//                 // };
+//                 log::info!("idk hello");
+//                 let unused_var = first_loop(&openai_key, text, &assistant_id);
+//                 // // Lock the global HashMap for thread safety
+//                 // let mut user_threads = USER_THREADS.lock().await;
+
+//                 // let (thread_id, mut run_id) = if let Some((thread_id, run_id)) = user_threads.get(&user_id) {
+//                 //     (thread_id.clone(), run_id.clone())
+//                 // } else {
+//                 //     sentinel_value = 1;
+//                 //     // Create a new thread
+//                 //     let thread_id = match create_openai_thread(&openai_key, text).await {
+//                 //         Ok(thread_id) => thread_id,
+//                 //         Err(e) => {
+//                 //             log::error!("Failed to create thread: {}", e);
+//                 //             bot.send_message(message.chat.id, "Failed to create thread. Please try again later.").await?;
+//                 //             return respond(());
+//                 //         }
+//                 //     };
+
+//                 //     // Create a new run on the thread with the assistant
+//                 //     let run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await {
+//                 //         Ok(run_id) => run_id,
+//                 //         Err(e) => {
+//                 //             log::error!("Failed to create run: {}", e);
+//                 //             bot.send_message(message.chat.id, "Failed to create run. Please try again later.").await?;
+//                 //             return respond(());
+//                 //         }
+//                 //     };
+
+//                 //     // Store both thread_id and run_id in the map
+//                 //     user_threads.insert(user_id, (thread_id.clone(), run_id.clone()));
+//                 //     (thread_id, run_id)
+//                 // };
+//                 // // //A run is just a fucking "process message". that's it. 
+//                 // // //I dont think we even need a hashmap of pairs of threads and runs
+//                 // // //So everytime I need to send a message, I need to create another run.
+//                 // // if sentinel_value == 0 {
+//                 // //     //aka if it hasn't already made a run on the same message, then make a run
+//                 // //     let _good = send_next_message(&thread_id, text);
+//                 // //     run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await {
+//                 // //         Ok(run_id) => run_id,
+//                 // //         Err(e) => {
+//                 // //             log::error!("Failed to create run: {}", e);
+//                 // //             bot.send_message(message.chat.id, "Failed to create run. Please try again later.").await?;
+//                 // //             return respond(());
+//                 // //         }
+//                 // //     };
+//                 // // }
+//                 // // Send message within the run in the thread
+//                 // match send_message_to_thread(&openai_key, &thread_id, &run_id, text).await {
+//                 //     Ok(response) => {
+//                 //         bot.send_message(message.chat.id, response).await?;
+//                 //     }
+//                 //     Err(e) => {
+//                 //         log::error!("Error sending message to thread: {}", e);
+//                 //         bot.send_message(message.chat.id, "Failed to send message. Please try again later.").await?;
+//                 //     }
+//                 // };
+//             }
+//             respond(())
+//         }
+//     }).await;
+// }
 
 
 
