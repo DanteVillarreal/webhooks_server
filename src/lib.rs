@@ -315,7 +315,7 @@ pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> 
 
     let response_text = response.text().await?;
     log::info!("Step 3 complete");
-    log::info!("Received response from send_message_to_thread: {}", response_text);
+    log::info!("Received response from add a user's message to the thread: {}", response_text);
 
     log::info!("Step 4 initializing. aka Run the assistant");
     log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/runs");
@@ -345,10 +345,19 @@ pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> 
         }
     }
     log::info!("Step 6 should be starting soon");
-    let get_last = get_last_assistant_message(openai_key, &thread_id);
+    match get_last_assistant_message(openai_key, &thread_id).await {
+        Ok(response) => {
+            log::info!("The last message from the assistant is: {}", response);
+            Ok(response)
+        },
+        Err(e) => {
+            log::error!("Failed to get the last assistant message: {}", e);
+            Ok("Failed to retrieve the assistant's response. Please try again later.".to_string())
+        }
+    }
 
-    let we_did_it = "Success";
-    Ok(we_did_it.to_string())
+    // let we_did_it = "Success";
+    // Ok(we_did_it.to_string())
 }
 
 
