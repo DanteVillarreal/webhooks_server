@@ -337,7 +337,7 @@ pub async fn first_loop(openai_key: &str, thread_id: &str, assistant_id: &str) -
         }
     };
 
-    const MAX_RETRIES: u32 = 5;
+    const MAX_RETRIES: u32 = 10;
     for attempt in 0..MAX_RETRIES {
         // Check if the run is active
         log::info!("Step 5 shoudl be starting soon");
@@ -407,7 +407,7 @@ pub async fn second_message_and_so_on(openai_key: &str, thread_id: &str, text: &
             }
         };
     //step 5
-        const MAX_RETRIES: u32 = 5;
+        const MAX_RETRIES: u32 = 10;
         for attempt in 0..MAX_RETRIES {
             // Check if the run is active
             log::info!("Step 5 shoudl be starting soon");
