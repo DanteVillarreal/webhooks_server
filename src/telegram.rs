@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::{call_openai_api, send_message_to_thread, create_openai_thread, create_run_on_thread, send_next_message, first_loop};
+use crate::{ create_openai_thread, first_loop, second_message_and_so_on};
 use anyhow::anyhow;
 
 
@@ -61,14 +61,47 @@ use anyhow::anyhow;
 
 // Global HashMap to store user_id to thread_id mappings
 lazy_static::lazy_static! {
-    static ref USER_THREADS: Arc<Mutex<HashMap<u64, (String, String)>>> = Arc::new(Mutex::new(HashMap::new()));
+    static ref USER_THREADS: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
-use log::{info, error}; // Import logging macros
+//use log::{info, error}; // Import logging macros
+
+// pub async fn run_telegram_bot() {
+//     let bot = Bot::from_env();
+//     info!("Bot started");
+//     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
+//     let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
+
+//     teloxide::repl(bot.clone(), move |message: Message, bot: Bot| {
+//         let openai_key = openai_key.clone();
+//         let assistant_id = assistant_id.clone();
+
+//         async move {
+//             if let Some(text) = message.text() {
+//                 info!("Received message: {}", text);
+
+//                 // Use first_loop to handle the OpenAI interactions
+//                 let response = match first_loop(&openai_key, text, &assistant_id).await {
+//                     Ok(response) => response,
+//                     Err(e) => {
+//                         log::error!("Failed to process message: {}", e);
+//                         "Failed to process message. Please try again later.".to_string()
+//                     }
+//                 };
+
+//                 // Send the response back to the user
+//                 if let Err(e) = bot.send_message(message.chat.id, response).await {
+//                     log::error!("Failed to send message to Telegram: {}", e);
+//                 }
+//             }
+//             respond(())
+//         }
+//     }).await;
+// }
 
 pub async fn run_telegram_bot() {
     let bot = Bot::from_env();
-    info!("Bot started");
+    log::info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
     let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
 
@@ -78,21 +111,47 @@ pub async fn run_telegram_bot() {
 
         async move {
             if let Some(text) = message.text() {
-                info!("Received message: {}", text);
+                log::info!("Received message: {}", text);
 
-                // Use first_loop to handle the OpenAI interactions
-                let response = match first_loop(&openai_key, text, &assistant_id).await {
-                    Ok(response) => response,
-                    Err(e) => {
-                        log::error!("Failed to process message: {}", e);
-                        "Failed to process message. Please try again later.".to_string()
+                // Get user ID
+                let user_id = message.from().map(|user| user.id.0).unwrap_or(0);
+
+                // Async block to handle user-specific thread logic
+                let response = {
+                    let mut user_threads = USER_THREADS.lock().await;
+                    let maybe_thread_id = user_threads.get(&user_id).cloned();
+
+                    match maybe_thread_id {
+                        Some(existing_thread_id) => {
+                            // Use existing thread ID and process subsequent messages
+                            second_message_and_so_on(&openai_key, &existing_thread_id, text, &assistant_id).await
+                        },
+                        None => {
+                            // Create new thread and process the initial message
+                            match create_openai_thread(&openai_key, text).await {
+                                Ok(new_thread_id) => {
+                                    user_threads.insert(user_id, new_thread_id.clone());
+                                    first_loop(&openai_key, &new_thread_id, &assistant_id).await
+                                },
+                                Err(e) => {
+                                    log::error!("Failed to create thread: {}", e);
+                                    Err(anyhow!("Failed to create thread"))
+                                }
+                            }
+                        }
                     }
                 };
 
-                // Send the response back to the user
-                if let Err(e) = bot.send_message(message.chat.id, response).await {
-                    log::error!("Failed to send message to Telegram: {}", e);
-                }
+                // Send the response back to the Telegram user
+                match response {
+                    Ok(response) => {
+                        bot.send_message(message.chat.id, response).await?;
+                    },
+                    Err(e) => {
+                        log::error!("Failed to process message: {}", e);
+                        bot.send_message(message.chat.id, "Failed to process message. Please try again later.").await?;
+                    }
+                };
             }
             respond(())
         }

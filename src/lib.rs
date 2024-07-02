@@ -103,7 +103,9 @@ pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
 
 pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
-
+    log::info!("Step 2 starting.In create_openai_thread rn. ");
+    log::info!("Step 3 technically starting as well since we are using the message");
+    log::info!("  in the json payload in the POST request to the url");
     let response = client.post("https://api.openai.com/v1/threads")
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", openai_key))
@@ -124,7 +126,7 @@ pub async fn create_openai_thread(openai_key: &str, initial_message: &str) -> an
         .ok_or_else(|| anyhow::anyhow!("Thread ID not found in response"))?
         .to_string();
     log::info!("Created new thread with ID: {}", thread_id);
-    log::info!("Step 2 complete");
+    log::info!("Step 2 complete. And step 3 as well");
     Ok(thread_id)
 }
 
@@ -235,75 +237,78 @@ pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> an
     // Ok("No assistant response found".to_string())
 }
 
+//Removed: 07/01/24 - ineffective.
+// pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &str, message: &str) -> anyhow::Result<String> {
+//     let client = reqwest::Client::new();
 
-pub async fn send_message_to_thread(openai_key: &str, thread_id: &str, run_id: &str, message: &str) -> anyhow::Result<String> {
-    let client = reqwest::Client::new();
+//     let json_payload = serde_json::json!({
+//         "role": "user",
+//         "content": message
+//     });
 
-    let json_payload = serde_json::json!({
-        "role": "user",
-        "content": message
-    });
+//     log::info!("send_message_to_thread payload: {}", json_payload);
 
-    log::info!("send_message_to_thread payload: {}", json_payload);
+//     // Retry logic added
+//     const MAX_RETRIES: u32 = 5;
+//     for attempt in 0..MAX_RETRIES {
+//         // Check if the run is active
+//         if is_run_active(openai_key, thread_id, run_id).await? {
+//             log::warn!("Active run detected, retrying... Attempt {}", attempt + 1);
+//             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+//             continue;
+//         }
+//         log::info!("Step 5 complete. AKA run status has been checked. NOT ACTIVE\n");
+//         log::info!("Step 3 initiating. Adding a Users' message to the thread.");
+//         log::info!("Aka POST https://api.openai.com/v1/threads/{thread_id}/messages");
+//         // Send user message
+//         let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+//             .header("Content-Type", "application/json")
+//             .header("Authorization", format!("Bearer {}", openai_key))
+//             .header("OpenAI-Beta", "assistants=v2")
+//             .json(&json_payload)
+//             .send()
+//             .await?;
 
-    // Retry logic added
-    const MAX_RETRIES: u32 = 5;
-    for attempt in 0..MAX_RETRIES {
-        // Check if the run is active
-        if is_run_active(openai_key, thread_id, run_id).await? {
-            log::warn!("Active run detected, retrying... Attempt {}", attempt + 1);
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            continue;
-        }
-        log::info!("Step 5 complete. AKA run status has been checked. NOT ACTIVE\n");
-        log::info!("Step 3 initiating. Adding a Users' message to the thread.");
-        log::info!("Aka POST https://api.openai.com/v1/threads/{thread_id}/messages");
-        // Send user message
-        let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", openai_key))
-            .header("OpenAI-Beta", "assistants=v2")
-            .json(&json_payload)
-            .send()
-            .await?;
+//         let response_text = response.text().await?;
 
-        let response_text = response.text().await?;
+//         log::info!("Received response from send_message_to_thread: {}", response_text);
+//         log::info!("Step 3 complete");
 
-        log::info!("Received response from send_message_to_thread: {}", response_text);
-        log::info!("Step 3 complete");
+//         let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
 
-        let response_json: serde_json::Value = serde_json::from_str(&response_text)?;
+//         // Now fetch the assistant's response
+//         match get_last_assistant_message(openai_key, thread_id).await {
+//             Ok(assistant_response) => return Ok(assistant_response),
+//             Err(e) => log::error!("Error getting last assistant message: {:?}", e),
+//         };
+//     }
 
-        // Now fetch the assistant's response
-        match get_last_assistant_message(openai_key, thread_id).await {
-            Ok(assistant_response) => return Ok(assistant_response),
-            Err(e) => log::error!("Error getting last assistant message: {:?}", e),
-        };
-    }
+//     // If all retries failed, return error
+//     Err(anyhow::anyhow!("Failed to send message after multiple attempts due to active run"))
+// }
 
-    // If all retries failed, return error
-    Err(anyhow::anyhow!("Failed to send message after multiple attempts due to active run"))
-}
-
-pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> anyhow::Result<String> {
+pub async fn first_loop(openai_key: &str, thread_id: &str, assistant_id: &str) -> anyhow::Result<String> {
     log::info!("got to first_loop");
-    log::info!("Step 2 should be starting soon.");
-    log::info!("Since I am already adding the message to the json_payload in step 2,");
-    log::info!("Step 3 is completed when the response from step 2 is received");
-    let thread_id = match create_openai_thread(&openai_key, message).await {
-        Ok(thread_id) => thread_id,
-        Err(e) => {
-            log::error!("Failed to create thread: {}", e);
-            let no_makey = "could not makey thread";
-            no_makey.to_string()
-        }
-    };
-    let client = reqwest::Client::new();
+    // log::info!("Step 2 should be starting soon.");
+    // log::info!("Since I am already adding the message to the json_payload in step 2,");
+    // log::info!("Step 3 is completed when the response from step 2 is received");
+    // let thread_id = match create_openai_thread(&openai_key, message).await {
+    //     Ok(thread_id) => thread_id,
+    //     Err(e) => {
+    //         log::error!("Failed to create thread: {}", e);
+    //         let no_makey = "could not makey thread";
+    //         no_makey.to_string()
+    //     }
+    // };
+//REMOVED because for the first loop, since the initial message is already sent when the\
+//      thread is created, there's no point in sending the message again. so step 3 is done
+//       when 2 is done
+    // let client = reqwest::Client::new();
 
-    let json_payload = serde_json::json!({
-        "role": "user",
-        "content": message
-    });
+    // let json_payload = serde_json::json!({
+    //     "role": "user",
+    //     "content": message
+    // });
 
     // log::info!("Step 3 initializing: aka add a user's message to the thread");
     // log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/messages");
@@ -363,6 +368,74 @@ pub async fn first_loop(openai_key: &str, message: &str, assistant_id: &str) -> 
     // Ok(we_did_it.to_string())
 }
 
+
+pub async fn second_message_and_so_on(openai_key: &str, thread_id: &str, text: &str, assistant_id: &str) -> anyhow::Result<String> {
+    //step 3
+        log::info!("since step 2 is already done, aka create the thread, we'll move on to step 3.");
+        let client = reqwest::Client::new();
+
+        let json_payload = serde_json::json!({
+            "role": "user",
+            "content": text
+        });
+
+        log::info!("Step 3 initializing: aka add a user's message to the thread");
+        log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/messages");
+
+        let response = client.post(&format!("https://api.openai.com/v1/threads/{}/messages", thread_id))
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .header("OpenAI-Beta", "assistants=v2")
+        .json(&json_payload)
+        .send()
+        .await?;
+
+        let response_text = response.text().await?;
+        log::info!("Step 3 complete");
+        log::info!("Received response from add a user's message to the thread: {}", response_text);
+
+    //step 4
+        log::info!("Step 4 initializing. aka Run the assistant");
+        log::info!("aka POST https://api.openai.com/v1/threads/{thread_id}/runs");
+
+        let run_id = match create_run_on_thread(&openai_key, &thread_id, &assistant_id).await {
+            Ok(run_id) => run_id,
+            Err(e) => {
+                log::error!("Failed to create run: {}", e);
+                let no_run = "couldn't make run";
+                no_run.to_string()
+            }
+        };
+    //step 5
+        const MAX_RETRIES: u32 = 5;
+        for attempt in 0..MAX_RETRIES {
+            // Check if the run is active
+            log::info!("Step 5 shoudl be starting soon");
+            if is_run_active(openai_key, &thread_id, &run_id).await? {
+                log::warn!("Active run detected, retrying... Attempt {}", attempt + 1);
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                //continue to next iteration of for loop
+                continue;
+            }
+            else {
+                //break out of of for loop
+                break;
+            }
+        }
+    
+    //step 6
+        log::info!("Step 6 should be starting soon");
+        match get_last_assistant_message(openai_key, &thread_id).await {
+            Ok(response) => {
+                //log::info!("The last message from the assistant is: {}", response);
+                Ok(response)
+            },
+            Err(e) => {
+                log::error!("Failed to get the last assistant message: {}", e);
+                Ok("Failed to retrieve the assistant's response. Please try again later.".to_string())
+            }
+        }
+}
 
 
 pub async fn send_next_message(thread_id: &str, text: &str) -> anyhow::Result<()> {
