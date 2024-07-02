@@ -214,7 +214,7 @@ pub async fn get_last_assistant_message(openai_key: &str, thread_id: &str) -> an
     let assistant_texts: Vec<String> = assistant_messages.iter().map(|msg| {
         msg["content"][0]["text"]["value"].as_str().unwrap().to_string()
     }).collect();
-    if let Some(last_message) = assistant_texts.last() {
+    if let Some(last_message) = assistant_texts.first() {
         log::info!("The last message from the assistant is: {}", last_message);
         Ok(last_message.to_string())
     } else {
