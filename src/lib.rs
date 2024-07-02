@@ -3,8 +3,12 @@
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::env;
-
+use uuid::Uuid;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use anyhow;
+use reqwest::multipart;
 
 pub mod webhooks;
 pub mod telegram;
@@ -22,6 +26,14 @@ pub struct Message {
     pub chat: Chat,
     pub date: u64,
     pub text: Option<String>,
+    pub audio: Option<Audio>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Audio {
+    pub file_id: String,
+    //pub file_unique_id: String,
+    pub duration: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -43,11 +55,41 @@ pub struct Chat {
     pub type_: String,
 }
 
-pub async fn handle_message(message: Message, input_text: String, openai_key: String) {
-    let bot_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
+
+
+
+
+
+
+
+
+
+
+pub async fn handle_message_handler(message: Message, openai_key: String,) {
+    match handle_message(message.clone(), openai_key.clone()).await {
+        Ok(_) => (),
+        Err(e) => log::error!("Error handling message: {:?}", e),
+    }
+}
+
+pub async fn handle_message(
+    message: Message,
+    openai_key: String,
+) -> Result<(), anyhow::Error> {
+    let bot_token = env::var("TELOXIDE_TOKEN")?;
     let chat_id = message.chat.id;
 
-    let response_text = call_openai_api(&openai_key, &input_text).await;
+    if let Some(ref text) = message.text {
+        handle_text_message(&bot_token, &chat_id, text, &openai_key).await?;
+    } else if let Some(ref audio) = message.audio {
+        handle_audio_message(&bot_token, &chat_id, audio, &openai_key).await?;
+    }
+
+    Ok(())
+}
+
+async fn handle_text_message(bot_token: &str, chat_id: &u64, input_text: &str, openai_key: &str) -> Result<(), anyhow::Error> {
+    let response_text = call_openai_api(openai_key, input_text).await;
 
     let bot = Client::new();
     bot.post(&format!("https://api.telegram.org/bot{}/sendMessage", bot_token))
@@ -56,9 +98,75 @@ pub async fn handle_message(message: Message, input_text: String, openai_key: St
             "text": response_text,
         }))
         .send()
-        .await
-        .expect("Failed to send message to Telegram");
+        .await?;
+
+    Ok(())
 }
+
+async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, openai_key: &str) -> Result<(), anyhow::Error> {
+    // Download the audio file from Telegram
+    let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, audio.file_id);
+    let file_path = download_file(&file_url, "audio").await?;
+
+    // Call OpenAI API to transcribe audio
+    let transcription = transcribe_audio(openai_key, &file_path).await?;
+
+    let bot = Client::new();
+    bot.post(&format!("https://api.telegram.org/bot{}/sendMessage", bot_token))
+        .json(&serde_json::json!({
+            "chat_id": chat_id,
+            "text": transcription,
+        }))
+        .send()
+        .await?;
+
+    Ok(())
+}
+
+async fn download_file(url: &str, file_type: &str) -> Result<String, anyhow::Error> {
+    let client = Client::new();
+    let response = client.get(url).send().await?;
+    
+    let filename = format!("{}.{}", Uuid::new_v4(), file_type);
+    let mut file = File::create(&filename).await?;
+    let content = response.bytes().await?;
+    file.write_all(&content).await?;
+
+    Ok(filename)
+}
+
+async fn transcribe_audio(
+    openai_key: &str,
+    file_path: &str,
+) -> Result<String, anyhow::Error> {
+    let client = Client::new();
+
+    // Read the content of the file
+    let mut file = tokio::fs::File::open(file_path).await?;
+    let mut file_content = Vec::new();
+    file.read_to_end(&mut file_content).await?;
+
+    let file_part = multipart::Part::stream(file_content);
+    let form = multipart::Form::new()
+        .text("model", "whisper-1")
+        .part("file", file_part);
+
+    let response = client
+        .post("https://api.openai.com/v1/audio/transcriptions")
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .multipart(form)
+        .send()
+        .await?;
+
+    let response_json: serde_json::Value = response.json().await?;
+    let transcription = response_json["text"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Transcription not found in response"))?
+        .to_string();
+
+    Ok(transcription)
+}
+
 
 pub async fn call_openai_api(openai_key: &str, input: &str) -> String {
     let client = Client::new();

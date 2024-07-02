@@ -1,7 +1,7 @@
 // src/webhooks.rs
 
 use warp::Filter;
-use crate::{WebhookPayload, handle_message};
+use crate::{WebhookPayload, handle_message_handler};
 use std::env;
 
 pub async fn run_webhook_server() {
@@ -15,9 +15,7 @@ pub async fn run_webhook_server() {
             let openai_key = openai_key.clone();
             async move {
                 if let Some(ref message) = payload.message {
-                    if let Some(ref text) = message.text {
-                        handle_message(message.clone(), text.to_string(), openai_key).await;
-                    }
+                    handle_message_handler(message.clone(), openai_key).await;
                 }
                 Ok::<_, warp::Rejection>(warp::reply::json(&"OK"))
             }
