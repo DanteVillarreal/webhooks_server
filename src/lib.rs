@@ -272,13 +272,16 @@ async fn transcribe_audio(openai_key: &str, file_path: &str) -> Result<String, a
         .part("file", file_part);
 
     log::info!("Audio: step 4: beginning to send file to get it transcribed");
-    let response = client
-        .post("https://api.openai.com/v1/audio/transcriptions")
-        .header("Authorization", format!("Bearer {}", openai_key))
-        .multipart(form)
-        .send()
-        .await
-        .context("Failed to send the request to OpenAI")?;
+    let response = match client
+    .post("https://api.openai.com/v1/audio/transcriptions")
+    .header("Authorization", format!("Bearer {}", openai_key))
+    .multipart(form)
+    .send()
+    .await {
+        Ok(response) => response,
+        Err(e) => return Err(anyhow::anyhow!("Failed to send the request to OpenAI: {}", e)),
+    };
+
 
     if !response.status().is_success() {
         anyhow::bail!("Received non-200 status code ({}) from OpenAI", response.status());
