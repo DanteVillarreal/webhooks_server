@@ -273,14 +273,14 @@ async fn transcribe_audio(openai_key: &str, file_path: &str) -> Result<String, a
 
     log::info!("Audio: step 4: beginning to send file to get it transcribed");
     let response = match client
-    .post("https://api.openai.com/v1/audio/transcriptions")
-    .header("Authorization", format!("Bearer {}", openai_key))
-    .multipart(form)
-    .send()
-    .await {
-        Ok(response) => response,
-        Err(e) => return Err(anyhow::anyhow!("Failed to send the request to OpenAI: {}", e)),
-    };
+        .post("https://api.openai.com/v1/audio/transcriptions")
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .multipart(form)
+        .send()
+        .await {
+            Ok(response) => response,
+            Err(e) => return Err(anyhow::anyhow!("Failed to send the request to OpenAI: {}", e)),
+        };
 
 
     if !response.status().is_success() {
