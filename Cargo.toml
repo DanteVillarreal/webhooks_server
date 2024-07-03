@@ -11,7 +11,7 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dotenv = "0.15"
-reqwest = { version = "0.12", features = ["json", "multipart"] }
+reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
 teloxide = "0.12"
 log = "0.4.22"
 env_logger = "0.11.3"
@@ -19,3 +19,4 @@ log4rs = "1.2.0"
 lazy_static = "1.4"
 anyhow = "1.0"
 uuid = { version = "1.9.1", features = ["v4"] } #for unique file names
+tokio-util = "0.7.11"
