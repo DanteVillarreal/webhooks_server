@@ -258,18 +258,20 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
 
     // Read the content of the file
     log::info!("Audio: step 4 initializing: opening file");
-    let mut file = tokio::fs::File::open(file_path).await
-        .context("Failed to open the file")?;
-    let mut file_content = Vec::new();
+    let file_handle = tokio::fs::File::open(file_path).await
+    .context("Failed to open the file")?;
 
-    log::info!("Audio: step 4: beginning to read file");
-    file.read_to_end(&mut file_content).await
-        .context("Failed to read the file content")?;
+    // Create a stream from the file
+    let bytes_stream = tokio_util::codec::FramedRead::new(file_handle, tokio_util::codec::BytesCodec::new());
 
-    let file_part = reqwest::multipart::Part::bytes(file_content)
+    // Create the multipart form
+    let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
         .file_name(file_path.to_string())  // Clone the file_path here
-        .mime_str(mime_type.expect("couldn't give it a mime ytpe"))?; // Use the provided MIME type, or a default one
-    log::info!("mime type was : {}", mime_type.clone().expect("couldn't unwrap"));
+        .mime_str(mime_type.expect("couldn't give it a mime type"))?; // Use the provided MIME type, or a default one
+
+
+
+
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
         .part("file", file_part);
