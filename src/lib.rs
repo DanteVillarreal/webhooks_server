@@ -66,22 +66,24 @@ pub struct Chat {
 
 
 pub async fn handle_message_handler(message: Message, openai_key: String,) {
+    log::info!("Audio: step 1: Got to handle message handler fn");
     match handle_message(message.clone(), openai_key.clone()).await {
         Ok(_) => (),
         Err(e) => log::error!("Error handling message: {:?}", e),
     }
 }
 
-pub async fn handle_message(
-    message: Message,
-    openai_key: String,
-) -> Result<(), anyhow::Error> {
-    let bot_token = env::var("TELOXIDE_TOKEN")?;
+pub async fn handle_message(message: Message, openai_key: String, ) -> Result<(), anyhow::Error> {
+    log::info!("god to handle_message fn");
+    let bot_token = env::var("TELOXIDE_TOKEN")
+        .expect("TELOXIDE_TOKEN does not exist. check naming");
     let chat_id = message.chat.id;
 
     if let Some(ref text) = message.text {
+        log::info!("about to handle message as a text");
         handle_text_message(&bot_token, &chat_id, text, &openai_key).await?;
     } else if let Some(ref audio) = message.audio {
+        log::info!("about to handle message as audio");
         handle_audio_message(&bot_token, &chat_id, audio, &openai_key).await?;
     }
 
