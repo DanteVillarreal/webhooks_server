@@ -285,7 +285,9 @@ async fn transcribe_audio(openai_key: &str, file_path: &str) -> Result<String, a
 
 
     if !response.status().is_success() {
-        anyhow::bail!("Received non-200 status code ({}) from OpenAI", response.status());
+        let status = response.status();
+        let text = response.text().await.unwrap_or_else(|_| String::from("Failed to read response text"));
+        anyhow::bail!("Received non-200 status code ({}) from OpenAI: {}", status, text);
     }
     log::info!("Audio: step 4: Successfuly sent requst for transcription");
 
