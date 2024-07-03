@@ -20,3 +20,4 @@ lazy_static = "1.4"
 anyhow = "1.0"
 uuid = { version = "1.9.1", features = ["v4"] } #for unique file names
 tokio-util = "0.7.11"
+mime_guess = "2.0.3"

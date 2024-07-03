@@ -280,7 +280,8 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
 
 
     log::info!("Audio: step 4: successfully made file_part");
-
+    let mime_guess = mime_guess::from_path(file_path).first_or_octet_stream();
+    log::info!("Guessed MIME type: {}", mime_guess);
     log::info!("beginning to send request to transcriptions");
 
     let response = client
