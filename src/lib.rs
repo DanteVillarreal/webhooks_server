@@ -256,7 +256,7 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
     log::info!("Audio: step 4: in transcribe_audio.");
     let client = Client::new();
 
-    // Read the content of the file
+    // Open file
     log::info!("Audio: step 4 initializing: opening file");
     let file_handle = tokio::fs::File::open(file_path).await
     .context("Failed to open the file")?;
@@ -264,9 +264,19 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
     // Create a stream from the file
     let bytes_stream = tokio_util::codec::FramedRead::new(file_handle, tokio_util::codec::BytesCodec::new());
 
+    //extract file name from the file path
+    // Extract the file name from the file path
+    let path = std::path::Path::new(file_path);
+    let file_name = path.file_name()
+        .ok_or_else(|| anyhow::anyhow!("Failed to extract file name from path"))?
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Failed to convert file name to string"))?;
+
+    log::info!("Audio: file's name is: {file_name}");
+    log::info!("mime type is: {:?}", mime_type);
     // Create the multipart form
     let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
-        .file_name(file_path.to_string())  // Clone the file_path here
+        .file_name(file_name.to_string())  // Clone the file_path here
         .mime_str(mime_type.expect("couldn't give it a mime type"))?; // Use the provided MIME type, or a default one
 
 
@@ -280,8 +290,6 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
 
 
     log::info!("Audio: step 4: successfully made file_part");
-    let mime_guess = mime_guess::from_path(file_path).first_or_octet_stream();
-    log::info!("Guessed MIME type: {}", mime_guess);
     log::info!("beginning to send request to transcriptions");
 
     let response = client
