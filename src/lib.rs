@@ -13,6 +13,7 @@ use anyhow::Context;
 use anyhow::Result;
 pub mod webhooks;
 pub mod telegram;
+use serde_json::Value;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WebhookPayload {
@@ -108,15 +109,44 @@ async fn handle_text_message(bot_token: &str, chat_id: &u64, input_text: &str, o
     Ok(())
 }
 
+// async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, openai_key: &str) -> Result<(), anyhow::Error> {
+//     log::info!("Audio: step 2: In handle_audio_message fn");
+//     // Download the audio file from Telegram
+//     //let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, audio.file_id);
+//     let file_url = format!("https://api.telegram.org/file/bot{}/getFile", bot_token);
+//     log::info!("Audio: step 2: about to download audio file");
+//     let file_path = download_file(&file_url, "audio", &audio.file_id).await?;
+
+//     // Call OpenAI API to transcribe audio
+//     let transcription = transcribe_audio(openai_key, &file_path).await?;
+//     log::info!("audio message transcribed to: {}", transcription);
+
+//     let bot = Client::new();
+//     bot.post(&format!("https://api.telegram.org/bot{}/sendMessage", bot_token))
+//         .json(&serde_json::json!({
+//             "chat_id": chat_id,
+//             "text": transcription,
+//         }))
+//         .send()
+//         .await?;
+
+//     Ok(())
+// }
+
 async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, openai_key: &str) -> Result<(), anyhow::Error> {
     log::info!("Audio: step 2: In handle_audio_message fn");
+
+    // Get the file path from Telegram using the get_file function
+    let file_path = get_file(bot_token, &audio.file_id).await?;
+    log::info!("Audio: step 2: got file path");
+
     // Download the audio file from Telegram
-    let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, audio.file_id);
+    let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, &file_path);
     log::info!("Audio: step 2: about to download audio file");
-    let file_path = download_file(&file_url, "audio").await?;
+    let file_name = download_file(&file_url, "audio", &audio.file_id).await?;
 
     // Call OpenAI API to transcribe audio
-    let transcription = transcribe_audio(openai_key, &file_path).await?;
+    let transcription = transcribe_audio(openai_key, &file_name).await?;
     log::info!("audio message transcribed to: {}", transcription);
 
     let bot = Client::new();
@@ -131,13 +161,30 @@ async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, ope
     Ok(())
 }
 
-async fn download_file(url: &str, file_type: &str) -> Result<String, anyhow::Error> {
+
+
+async fn get_file(bot_token: &str, file_id: &str) -> Result<String> {
+    log::info!("Audio: step 2 initializing. in get_file right now");
+    let client = Client::new();
+    let res: Value = client.post(&format!("https://api.telegram.org/bot{}/getFile", bot_token))
+        .form(&[("file_id", file_id)])
+        .send()
+        .await?
+        .json()
+        .await?;
+    let file_path = res["result"]["file_path"].as_str().unwrap().to_string();
+    Ok(file_path)
+}
+
+
+
+async fn download_file(url: &str, file_type: &str, file_id: &str) -> Result<String, anyhow::Error> {
     log::info!("Audio: step 3: in download_file fn");
     
     let client = Client::new();
     log::info!("Audio: step 3 initializing");
     
-    // Send GET request to the URL
+    // Send POST request to the URL to GET the file_path
     let response = client
         .get(url)
         .send()
