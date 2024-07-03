@@ -268,8 +268,9 @@ async fn transcribe_audio(openai_key: &str, file_path: &str) -> Result<String, a
 
     let file_part = multipart::Part::stream(file_content);
     let form = multipart::Form::new()
-        .text("model", "whisper-1")
-        .part("file", file_part);
+        .part("file", file_part)
+        .text("model", "whisper-1");
+  
 
     log::info!("Audio: step 4: beginning to send file to get it transcribed");
     let response = match client
