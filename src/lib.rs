@@ -142,10 +142,11 @@ async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, ope
 
     // Download the audio file from Telegram
     let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, &file_path);
-    log::info!("Audio: step 2: about to download audio file");
+    log::info!("Audio: step 3: about to download audio file");
     let file_name = download_file(&file_url, "audio", &audio.file_id).await?;
 
     // Call OpenAI API to transcribe audio
+    log::info!("Audio: step 4: about to transcribe the audio message");
     let transcription = transcribe_audio(openai_key, &file_name).await?;
     log::info!("audio message transcribed to: {}", transcription);
 
@@ -220,30 +221,72 @@ async fn download_file(url: &str, file_type: &str, file_id: &str) -> Result<Stri
     Ok(filename)
 }
 
-async fn transcribe_audio(
-    openai_key: &str,
-    file_path: &str,
-) -> Result<String, anyhow::Error> {
+// async fn transcribe_audio(openai_key: &str, file_path: &str, ) -> Result<String, anyhow::Error> {
+//     log::info!("Audio: step 4: in transcribe_audio.");
+//     let client = Client::new();
+
+//     // Read the content of the file
+//     let mut file = tokio::fs::File::open(file_path).await?;
+//     let mut file_content = Vec::new();
+//     file.read_to_end(&mut file_content).await?;
+
+//     let file_part = multipart::Part::stream(file_content);
+//     let form = multipart::Form::new()
+//         .text("model", "whisper-1")
+//         .part("file", file_part);
+
+//     let response = client
+//         .post("https://api.openai.com/v1/audio/transcriptions")
+//         .header("Authorization", format!("Bearer {}", openai_key))
+//         .multipart(form)
+//         .send()
+//         .await?;
+
+//     let response_json: serde_json::Value = response.json().await?;
+//     let transcription = response_json["text"]
+//         .as_str()
+//         .ok_or_else(|| anyhow::anyhow!("Transcription not found in response"))?
+//         .to_string();
+
+//     Ok(transcription)
+// }
+async fn transcribe_audio(openai_key: &str, file_path: &str) -> Result<String, anyhow::Error> {
+    log::info!("Audio: step 4: in transcribe_audio.");
     let client = Client::new();
 
     // Read the content of the file
-    let mut file = tokio::fs::File::open(file_path).await?;
+    log::info!("Audio: step 4 initializing: opening file");
+    let mut file = tokio::fs::File::open(file_path).await
+        .context("Failed to open the file")?;
+    log::info!("Audio: step 4: opened file");
+
+    log::info!("Audio: step 4: beginning to read file");
     let mut file_content = Vec::new();
-    file.read_to_end(&mut file_content).await?;
+    file.read_to_end(&mut file_content).await
+        .context("Failed to read the file content")?;
+    log::info!("Audio: step 4: successfully read file to the end");
 
     let file_part = multipart::Part::stream(file_content);
     let form = multipart::Form::new()
         .text("model", "whisper-1")
         .part("file", file_part);
 
+    log::info!("Audio: step 4: beginning to send file to get it transcribed");
     let response = client
         .post("https://api.openai.com/v1/audio/transcriptions")
         .header("Authorization", format!("Bearer {}", openai_key))
         .multipart(form)
         .send()
-        .await?;
+        .await
+        .context("Failed to send the request to OpenAI")?;
 
-    let response_json: serde_json::Value = response.json().await?;
+    if !response.status().is_success() {
+        anyhow::bail!("Received non-200 status code ({}) from OpenAI", response.status());
+    }
+    log::info!("Audio: step 4: Successfuly sent requst for transcription");
+
+    let response_json: serde_json::Value = response.json().await
+        .context("Failed to parse the response from OpenAI")?;
     let transcription = response_json["text"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Transcription not found in response"))?
