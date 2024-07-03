@@ -270,12 +270,15 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
     log::info!("file_format var is: {:?}", file_format);
 
     let file_part = reqwest::multipart::Part::bytes(file_content)
-        .file_name(file_path.to_string())  // Clone the file_path here
-        .mime_str(file_format.expect("couldnt get mime type")); // Use the provided MIME type
+        .file_name(format!("{}.{}", file_path, file_format
+            .expect("couldn't unwrap file_format. probably was None")));  // Append the extension to the file_path here
+
+
+
     log::info!("Audio: step 4: successfully made file_part");
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
-        .part("file", file_part?);
+        .part("file", file_part);
 
     log::info!("beginning to send request to transcriptions");
 
