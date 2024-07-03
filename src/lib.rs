@@ -144,7 +144,9 @@ async fn download_file(url: &str, file_type: &str) -> Result<String, anyhow::Err
     
     // Ensure the request was successful
     if !response.status().is_success() {
-        anyhow::bail!("Received non-200 status code: {}", response.status());
+        let error_message = format!("Received non-200 status code ({}) when trying to access URL: {}", response.status(), url);
+        log::error!("{}", error_message);
+        anyhow::bail!(error_message);
     }
 
     let filename = format!("{}.{}", Uuid::new_v4(), file_type);
