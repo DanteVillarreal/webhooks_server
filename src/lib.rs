@@ -115,6 +115,7 @@ async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, ope
 
     // Call OpenAI API to transcribe audio
     let transcription = transcribe_audio(openai_key, &file_path).await?;
+    log::info!("audio message transcribed to: {}", transcription);
 
     let bot = Client::new();
     bot.post(&format!("https://api.telegram.org/bot{}/sendMessage", bot_token))
