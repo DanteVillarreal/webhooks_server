@@ -38,6 +38,7 @@ pub struct Audio {
     pub duration: u64,
     pub file_size: Option<u64>,
     pub file_path: Option<String>,
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -147,7 +148,7 @@ async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, ope
 
     // Call OpenAI API to transcribe audio
     log::info!("Audio: step 4: about to transcribe the audio message");
-    let transcription = transcribe_audio(openai_key, &file_name).await?;
+    let transcription = transcribe_audio(openai_key, &file_name, audio.mime_type.as_deref()).await?;
     log::info!("audio message transcribed to: {}", transcription);
 
     let bot = Client::new();
@@ -251,7 +252,7 @@ async fn download_file(url: &str, file_type: &str, file_id: &str) -> Result<Stri
 //     Ok(transcription)
 // }
 
-async fn transcribe_audio(openai_key: &str, file_path: &str) -> Result<String, anyhow::Error> {
+async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
     log::info!("Audio: step 4: in transcribe_audio.");
     let client = Client::new();
 
@@ -267,11 +268,11 @@ async fn transcribe_audio(openai_key: &str, file_path: &str) -> Result<String, a
 
     let file_part = reqwest::multipart::Part::bytes(file_content)
         .file_name(file_path.to_string())  // Clone the file_path here
-        .mime_str("application/octet-stream")?; // Set the MIME type to a general binary stream
+        .mime_str(mime_type.expect("couldnt get mime type")); // Use the provided MIME type
 
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
-        .part("file", file_part);
+        .part("file", file_part?);
     log::info!("beginning to send request to transcriptions");
     let response = client
         .post("https://api.openai.com/v1/audio/transcriptions")

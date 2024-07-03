@@ -147,6 +147,8 @@ fn convert_teloxide_message_to_custom(message: teloxide::prelude::Message) -> Cu
             duration: audio.duration as u64,
             file_size: Some(audio.file.size as u64),  // Convert and set file_size
             file_path: None,  // Initially None, to be fetched later
+            mime_type: audio.mime_type.as_ref().map(|mime| mime.to_string()),  // Convert Mime to String
+            //mime_type: audio.mime_type.clone(), //doesnt work because is type mime
         }),
     }
 }
