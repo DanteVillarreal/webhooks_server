@@ -267,16 +267,23 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
     //extract file name from the file path
     // Extract the file name from the file path
     let path = std::path::Path::new(file_path);
-    let file_name = path.file_name()
-        .ok_or_else(|| anyhow::anyhow!("Failed to extract file name from path"))?
+    let file_stem = path.file_stem()
+        .ok_or_else(|| anyhow::anyhow!("Failed to extract file stem from path"))?
         .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Failed to convert file name to string"))?;
+        .ok_or_else(|| anyhow::anyhow!("Failed to convert file stem to string"))?;
+    log::info!("Audio: file stem is: {}", file_stem);
+
+    // Get the extension from the mime_type
+    let extension = mime_type.map(|mime| mime.split('/').nth(1).expect("couldn't parse mime type"));
+
+    // Create the new file name
+    let file_name = format!("{}.{}", file_stem, extension.unwrap_or("audio"));
 
     log::info!("Audio: file's name is: {file_name}");
     log::info!("mime type is: {:?}", mime_type);
     // Create the multipart form
     let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
-        .file_name(file_name.to_string())  // Clone the file_path here
+        .file_name(file_name)  // Clone the file_path here
         .mime_str(mime_type.expect("couldn't give it a mime type"))?; // Use the provided MIME type, or a default one
 
 
