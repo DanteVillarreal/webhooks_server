@@ -9,6 +9,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use anyhow;
 use reqwest::multipart;
+use anyhow::Context;
 
 pub mod webhooks;
 pub mod telegram;
@@ -66,7 +67,7 @@ pub struct Chat {
 
 
 pub async fn handle_message_handler(message: Message, openai_key: String,) {
-    log::info!("Audio: step 1: Got to handle message handler fn");
+    log::info!("Audio: step 0: Got to handle message handler fn");
     match handle_message(message.clone(), openai_key.clone()).await {
         Ok(_) => (),
         Err(e) => log::error!("Error handling message: {:?}", e),
@@ -74,7 +75,7 @@ pub async fn handle_message_handler(message: Message, openai_key: String,) {
 }
 
 pub async fn handle_message(message: Message, openai_key: String, ) -> Result<(), anyhow::Error> {
-    log::info!("god to handle_message fn");
+    log::info!("Audio: step 1: god to handle_message fn");
     let bot_token = env::var("TELOXIDE_TOKEN")
         .expect("TELOXIDE_TOKEN does not exist. check naming");
     let chat_id = message.chat.id;
@@ -106,8 +107,10 @@ async fn handle_text_message(bot_token: &str, chat_id: &u64, input_text: &str, o
 }
 
 async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, openai_key: &str) -> Result<(), anyhow::Error> {
+    log::info!("Audio: step 2: In handle_audio_message fn");
     // Download the audio file from Telegram
     let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, audio.file_id);
+    log::info!("Audio: step 2: about to download audio file");
     let file_path = download_file(&file_url, "audio").await?;
 
     // Call OpenAI API to transcribe audio
@@ -126,14 +129,42 @@ async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, ope
 }
 
 async fn download_file(url: &str, file_type: &str) -> Result<String, anyhow::Error> {
-    let client = Client::new();
-    let response = client.get(url).send().await?;
+    log::info!("Audio: step 3: in download_file fn");
     
-    let filename = format!("{}.{}", Uuid::new_v4(), file_type);
-    let mut file = File::create(&filename).await?;
-    let content = response.bytes().await?;
-    file.write_all(&content).await?;
+    let client = Client::new();
+    log::info!("Audio: step 3 initializing");
+    
+    // Send GET request to the URL
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("Failed to send GET request to URL: {}", url))?;
+    
+    // Ensure the request was successful
+    if !response.status().is_success() {
+        anyhow::bail!("Received non-200 status code: {}", response.status());
+    }
 
+    let filename = format!("{}.{}", Uuid::new_v4(), file_type);
+    
+    // Create the file
+    let mut file = File::create(&filename)
+        .await
+        .with_context(|| format!("Failed to create file: {}", filename))?;
+    
+    // Extract the response content
+    let content = response
+        .bytes()
+        .await
+        .with_context(|| "Failed to read content from response".to_string())?;
+    
+    // Write content to the file
+    file.write_all(&content)
+        .await
+        .with_context(|| format!("Failed to write content to file: {}", filename))?;
+    
+    log::info!("Audio: step 3 completed successfully");
     Ok(filename)
 }
 
