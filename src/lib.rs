@@ -273,7 +273,9 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
         .part("file", file_part?);
+
     log::info!("beginning to send request to transcriptions");
+    log::info!("Mime type of file is: {:?}", mime_type);
     let response = client
         .post("https://api.openai.com/v1/audio/transcriptions")
         .header("Authorization", format!("Bearer {}", openai_key))
