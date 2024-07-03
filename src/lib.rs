@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 use anyhow;
 use reqwest::multipart;
 use anyhow::Context;
-
+use anyhow::Result;
 pub mod webhooks;
 pub mod telegram;
 
@@ -33,8 +33,10 @@ pub struct Message {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Audio {
     pub file_id: String,
-    //pub file_unique_id: String,
+    pub file_unique_id: String,
     pub duration: u64,
+    pub file_size: Option<u64>,
+    pub file_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

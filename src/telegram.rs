@@ -100,6 +100,24 @@ lazy_static::lazy_static! {
 //         }
 //     }).await;
 // }
+async fn get_file_path(file_id: &str, bot_token: &str) -> Result<String, anyhow::Error> {
+    let url = format!("https://api.telegram.org/bot{}/getFile?file_id={}", bot_token, file_id);
+
+    let client = reqwest::Client::new();
+    let response = client.get(&url).send().await?;
+    
+    // Ensure the request was successful
+    if !response.status().is_success() {
+        anyhow::bail!("Received non-200 status code: {}", response.status());
+    }
+
+    let response_json: serde_json::Value = response.json().await?;
+    if let Some(file_path) = response_json.get("result").and_then(|res| res.get("file_path")).and_then(|fp| fp.as_str()) {
+        Ok(file_path.to_string())
+    } else {
+        anyhow::bail!("File path not found in response for file id: {}", file_id);
+    }
+}
 
 fn convert_teloxide_message_to_custom(message: teloxide::prelude::Message) -> CustomMessage {
     CustomMessage {
@@ -122,10 +140,13 @@ fn convert_teloxide_message_to_custom(message: teloxide::prelude::Message) -> Cu
             },
         },
         date: message.date.timestamp() as u64,  // Convert DateTime to UNIX timestamp
-        text: message.text().map(|text| text.to_string()),  
+        text: message.text().map(|text| text.to_string()),
         audio: message.audio().map(|audio| Audio {
-            file_id: audio.file.id.clone(),
+            file_id: audio.file.id.clone(),  // Access the `file_id`
+            file_unique_id: audio.file.unique_id.clone(),  // Access the `file_unique_id`
             duration: audio.duration as u64,
+            file_size: Some(audio.file.size as u64),  // Convert and set file_size
+            file_path: None,  // Initially None, to be fetched later
         }),
     }
 }
@@ -139,7 +160,8 @@ pub async fn run_telegram_bot() {
     teloxide::repl(bot.clone(), move |message: teloxide::prelude::Message, bot: Bot| {
         let openai_key = openai_key.clone();
         let assistant_id = assistant_id.clone();
-        
+        let bot_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
+    
         async move {
             if let Some(text) = message.text() {
                 log::info!("Received message: {}", text);
@@ -183,12 +205,25 @@ pub async fn run_telegram_bot() {
                         bot.send_message(message.chat.id, "Failed to process message. Please try again later.").await?;
                     }
                 };
-            } else if let Some(_audio) = message.audio() {
+            } else if let Some(audio) = message.audio() {
                 log::info!("Received audio message");
+    
+                let mut custom_message = convert_teloxide_message_to_custom(message.clone());  // Clone message for re-use
                 let chat_id = message.chat.id;
-                let custom_message: CustomMessage = convert_teloxide_message_to_custom(message);  // Convert to your custom Message type
-                handle_message_handler(custom_message, openai_key.clone()).await;
-                bot.send_message(chat_id, "Processing your audio message...").await?;
+    
+                if let Some(ref mut custom_audio) = &mut custom_message.audio {
+                    match get_file_path(&custom_audio.file_id, &bot_token).await {
+                        Ok(file_path) => {
+                            custom_audio.file_path = Some(file_path);
+                            handle_message_handler(custom_message, openai_key.clone()).await;
+                            bot.send_message(chat_id, "Processing your audio message...").await?;
+                        },
+                        Err(e) => {
+                            log::error!("Failed to retrieve file path: {:?}", e);
+                            bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
+                        }
+                    }
+                }
             }
             respond(())
         }
