@@ -269,9 +269,15 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
     let file_format = mime_type.map(|mime| mime.split('/').nth(1).expect("file_format: couldn't parse mime type"));
     log::info!("file_format var is: {:?}", file_format);
 
+    let file_name = if file_path.ends_with(&format!(".{}", file_format.expect("couldn't unwrap file_format. probably was None"))) {
+        file_path.to_string()
+    } else {
+        format!("{}.{}", file_path, file_format.expect("couldn't unwrap file_format. probably was None"))
+    };
+    
     let file_part = reqwest::multipart::Part::bytes(file_content)
-        .file_name(format!("{}.{}", file_path, file_format
-            .expect("couldn't unwrap file_format. probably was None")));  // Append the extension to the file_path here
+        .file_name(file_name);
+    
 
 
 
