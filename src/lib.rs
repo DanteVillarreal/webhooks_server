@@ -309,14 +309,14 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
 
 //     Ok(transcription)
 // }
-async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
+async fn transcribe_audio(openai_key: &str, file_name: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
     log::info!("Audio: step 4: in transcribe_audio.");
     let client = Client::new();
-    log::info!("File path: {}", file_path);
+    log::info!("File name: {}", file_name);
     
     // Open file
     log::info!("Audio: step 4 initializing: opening file");
-    let file_handle = tokio::fs::File::open(file_path).await
+    let file_handle = tokio::fs::File::open(file_name).await
     .context("Failed to open the file")?;
 
     // Create a stream from the file
@@ -324,7 +324,7 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
 
     // Create the multipart form
     let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
-        .file_name(file_path.to_string())  // Use the original file name
+        .file_name(file_name.to_string())  // Use the original file name
         .mime_str(mime_type.expect("couldn't give it a mime type"))?; // Use the provided MIME type, or a default one
 
     let form = reqwest::multipart::Form::new()
