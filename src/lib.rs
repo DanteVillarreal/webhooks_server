@@ -322,17 +322,9 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
     // Create a stream from the file
     let bytes_stream = tokio_util::codec::FramedRead::new(file_handle, tokio_util::codec::BytesCodec::new());
 
-    // Extract the file name from the file path
-    let path = std::path::Path::new(file_path);
-    let file_name = path.file_name()
-        .ok_or_else(|| anyhow::anyhow!("Failed to extract file name from path"))?
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Failed to convert file name to string"))?;
-    log::info!("Audio: file's name is: {}", file_name);
-
     // Create the multipart form
     let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
-        .file_name(file_name.to_string())  // Use the original file name
+        .file_name(file_path.to_string())  // Use the original file name
         .mime_str(mime_type.expect("couldn't give it a mime type"))?; // Use the provided MIME type, or a default one
 
     let form = reqwest::multipart::Form::new()
