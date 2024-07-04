@@ -139,12 +139,13 @@ async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, ope
 
     // Get the file path from Telegram using the get_file function
     let file_path = get_file(bot_token, &audio.file_id).await?;
-    log::info!("Audio: step 2: got file path");
+    log::info!("Audio: step 2: In handle_audio_message. got file path");
+    log::info!("Audio: step 2: In handle_audio_message. File_path is {file_path}");
 
     // Download the audio file from Telegram
     let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, &file_path);
     log::info!("Audio: step 3: about to download audio file");
-    let file_name = download_file(&file_url, "audio", &audio.file_id).await?;
+    let file_name = download_file(&file_url, &audio.file_id, audio.mime_type.as_deref()).await?;
 
     // Call OpenAI API to transcribe audio
     log::info!("Audio: step 4: about to transcribe the audio message");
@@ -178,9 +179,7 @@ async fn get_file(bot_token: &str, file_id: &str) -> Result<String> {
     Ok(file_path)
 }
 
-
-
-async fn download_file(url: &str, file_type: &str, file_id: &str) -> Result<String, anyhow::Error> {
+async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
     log::info!("Audio: step 3: in download_file fn");
     
     let client = Client::new();
@@ -200,7 +199,24 @@ async fn download_file(url: &str, file_type: &str, file_id: &str) -> Result<Stri
         anyhow::bail!(error_message);
     }
 
-    let filename = format!("{}.{}", Uuid::new_v4(), file_type);
+    // Determine the file extension based on the MIME type
+    let file_extension = match mime_type {
+        Some("audio/flac") => "flac",
+        Some("audio/m4a") => "m4a",
+        Some("audio/mp3") => "mp3",
+        Some("audio/mp4") => "mp4",
+        Some("audio/mpeg") => "mpeg",
+        Some("audio/mpga") => "mpga",
+        Some("audio/oga") => "oga",
+        Some("audio/webm") => "webm",
+        Some("audio/wav") => "wav",
+        Some("audio/ogg") => "ogg",
+        // Add more MIME types and their corresponding file extensions as needed
+        _ => "unknown",
+    };
+
+    let filename = format!("{}.{}", Uuid::new_v4(), file_extension);
+    log::info!("Audio: step 3: in download_file. filename is {filename}");
     
     // Create the file
     let mut file = File::create(&filename)
@@ -221,6 +237,48 @@ async fn download_file(url: &str, file_type: &str, file_id: &str) -> Result<Stri
     log::info!("Audio: step 3 completed successfully");
     Ok(filename)
 }
+
+// async fn download_file(url: &str, file_type: &str, file_id: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
+//     log::info!("Audio: step 3: in download_file fn");
+    
+//     let client = Client::new();
+//     log::info!("Audio: step 3 initializing");
+    
+//     // Send POST request to the URL to GET the file_path
+//     let response = client
+//         .get(url)
+//         .send()
+//         .await
+//         .with_context(|| format!("Failed to send GET request to URL: {}", url))?;
+    
+//     // Ensure the request was successful
+//     if !response.status().is_success() {
+//         let error_message = format!("Received non-200 status code ({}) when trying to access URL: {}", response.status(), url);
+//         log::error!("{}", error_message);
+//         anyhow::bail!(error_message);
+//     }
+
+//     let filename = format!("{}.{}", Uuid::new_v4(), file_type);
+    
+//     // Create the file
+//     let mut file = File::create(&filename)
+//         .await
+//         .with_context(|| format!("Failed to create file: {}", filename))?;
+    
+//     // Extract the response content
+//     let content = response
+//         .bytes()
+//         .await
+//         .with_context(|| "Failed to read content from response".to_string())?;
+    
+//     // Write content to the file
+//     file.write_all(&content)
+//         .await
+//         .with_context(|| format!("Failed to write content to file: {}", filename))?;
+    
+//     log::info!("Audio: step 3 completed successfully");
+//     Ok(filename)
+// }
 
 // async fn transcribe_audio(openai_key: &str, file_path: &str, ) -> Result<String, anyhow::Error> {
 //     log::info!("Audio: step 4: in transcribe_audio.");
@@ -251,11 +309,11 @@ async fn download_file(url: &str, file_type: &str, file_id: &str) -> Result<Stri
 
 //     Ok(transcription)
 // }
-
 async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
     log::info!("Audio: step 4: in transcribe_audio.");
     let client = Client::new();
     log::info!("File path: {}", file_path);
+    
     // Open file
     log::info!("Audio: step 4 initializing: opening file");
     let file_handle = tokio::fs::File::open(file_path).await
@@ -264,37 +322,22 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
     // Create a stream from the file
     let bytes_stream = tokio_util::codec::FramedRead::new(file_handle, tokio_util::codec::BytesCodec::new());
 
-    //extract file name from the file path
     // Extract the file name from the file path
     let path = std::path::Path::new(file_path);
-    let file_stem = path.file_stem()
-        .ok_or_else(|| anyhow::anyhow!("Failed to extract file stem from path"))?
+    let file_name = path.file_name()
+        .ok_or_else(|| anyhow::anyhow!("Failed to extract file name from path"))?
         .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Failed to convert file stem to string"))?;
-    log::info!("Audio: file stem is: {}", file_stem);
+        .ok_or_else(|| anyhow::anyhow!("Failed to convert file name to string"))?;
+    log::info!("Audio: file's name is: {}", file_name);
 
-    // Get the extension from the mime_type
-    let extension = mime_type.map(|mime| mime.split('/').nth(1).expect("couldn't parse mime type"));
-
-    // Create the new file name
-    let file_name = format!("{}.{}", file_stem, extension.unwrap_or("audio"));
-
-    log::info!("Audio: file's name is: {file_name}");
-    log::info!("mime type is: {:?}", mime_type);
     // Create the multipart form
     let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
-        .file_name(file_name)  // Clone the file_path here
+        .file_name(file_name.to_string())  // Use the original file name
         .mime_str(mime_type.expect("couldn't give it a mime type"))?; // Use the provided MIME type, or a default one
-
-
-
 
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
         .part("file", file_part);
-    
-
-
 
     log::info!("Audio: step 4: successfully made file_part");
     log::info!("beginning to send request to transcriptions");
@@ -322,6 +365,76 @@ async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&
 
     Ok(transcription)
 }
+// async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
+//     log::info!("Audio: step 4: in transcribe_audio.");
+//     let client = Client::new();
+//     log::info!("File path: {}", file_path);
+//     // Open file
+//     log::info!("Audio: step 4 initializing: opening file");
+//     let file_handle = tokio::fs::File::open(file_path).await
+//     .context("Failed to open the file")?;
+
+//     // Create a stream from the file
+//     let bytes_stream = tokio_util::codec::FramedRead::new(file_handle, tokio_util::codec::BytesCodec::new());
+
+//     //extract file name from the file path
+//     // Extract the file name from the file path
+//     let path = std::path::Path::new(file_path);
+//     let file_stem = path.file_stem()
+//         .ok_or_else(|| anyhow::anyhow!("Failed to extract file stem from path"))?
+//         .to_str()
+//         .ok_or_else(|| anyhow::anyhow!("Failed to convert file stem to string"))?;
+//     log::info!("Audio: file stem is: {}", file_stem);
+
+//     // Get the extension from the mime_type
+//     let extension = mime_type.map(|mime| mime.split('/').nth(1).expect("couldn't parse mime type"));
+
+//     // Create the new file name
+//     let file_name = format!("{}.{}", file_stem, extension.expect("couldn't add extension on"));
+
+//     log::info!("Audio: file's name is: {file_name}");
+//     log::info!("mime type is: {:?}", mime_type);
+//     // Create the multipart form
+//     let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
+//         .file_name(file_name)  // Clone the file_path here
+//         .mime_str(mime_type.expect("couldn't give it a mime type"))?; // Use the provided MIME type, or a default one
+
+
+
+
+//     let form = reqwest::multipart::Form::new()
+//         .text("model", "whisper-1")
+//         .part("file", file_part);
+    
+
+
+
+//     log::info!("Audio: step 4: successfully made file_part");
+//     log::info!("beginning to send request to transcriptions");
+
+//     let response = client
+//         .post("https://api.openai.com/v1/audio/transcriptions")
+//         .header("Authorization", format!("Bearer {}", openai_key))
+//         .multipart(form)
+//         .send()
+//         .await
+//         .context("Failed to send the request to OpenAI")?;
+
+//     if !response.status().is_success() {
+//         let status = response.status();
+//         let text = response.text().await.unwrap_or_else(|_| String::from("Failed to read response text"));
+//         anyhow::bail!("Received non-200 status code ({}) from OpenAI: {}", status, text);
+//     }
+
+//     let response_json: serde_json::Value = response.json().await
+//         .context("Failed to parse the response from OpenAI")?;
+//     let transcription = response_json["text"]
+//         .as_str()
+//         .ok_or_else(|| anyhow::anyhow!("Transcription not found in response"))?
+//         .to_string();
+
+//     Ok(transcription)
+// }
 
 
 
