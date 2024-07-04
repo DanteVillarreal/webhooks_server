@@ -255,7 +255,7 @@ async fn download_file(url: &str, file_type: &str, file_id: &str) -> Result<Stri
 async fn transcribe_audio(openai_key: &str, file_path: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
     log::info!("Audio: step 4: in transcribe_audio.");
     let client = Client::new();
-
+    log::info!("File path: {}", file_path);
     // Open file
     log::info!("Audio: step 4 initializing: opening file");
     let file_handle = tokio::fs::File::open(file_path).await
