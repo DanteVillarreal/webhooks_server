@@ -200,7 +200,7 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
         log::error!("{}", error_message);
         anyhow::bail!(error_message);
     }
-
+    log::info!("Audio: step 3: in download_file: mime type is {:?}", mime_type);
     // Determine the file extension based on the MIME type
     let file_extension = match mime_type {
         Some("audio/flac") => "flac",
