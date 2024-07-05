@@ -207,7 +207,7 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
         Some("audio/m4a") => "m4a",
         Some("audio/mp3") => "mp3",
         Some("audio/mp4") => "mp4",
-        Some("audio/mpeg") => "mpeg",
+        Some("audio/mpeg") => "mp3",
         Some("audio/mpga") => "mpga",
         Some("audio/oga") => "oga",
         Some("audio/webm") => "webm",
