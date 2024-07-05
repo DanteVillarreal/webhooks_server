@@ -481,16 +481,10 @@ async fn transcribe_audio(openai_key: &str, file_name: &str, mime_type: Option<&
 
     // Open file
     log::info!("Audio: step 4 initializing: opening file");
-    let file_path = std::path::Path::new(file_name);
-    let file = tokio::fs::File::open(file_path)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to open the file: {:?}", e))?;
-    
-    // Create a stream from the file
-    let bytes_stream = tokio_util::codec::FramedRead::new(file, tokio_util::codec::BytesCodec::new());
+    let audio_bytes = tokio::fs::read(file_name).await?;
 
-    // Wrap the stream into a multipart file part
-    let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
+    // Create a multipart file part
+    let file_part = reqwest::multipart::Part::stream(audio_bytes)
         .file_name(file_name.to_string())
         .mime_str(mime_type.expect("Couldn't give it a mime type"))?;
 
