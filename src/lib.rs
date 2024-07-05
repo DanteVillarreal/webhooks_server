@@ -470,83 +470,121 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
 //     Ok(transcription)
 // }
 
-// Helper function to log the file contents
-async fn log_file_contents(file_name: &str) -> Result<(), anyhow::Error> {
-    let mut file_handle = tokio::fs::File::open(file_name).await
-        .context("Failed to open the file")?;
-    let mut buffer = Vec::new();
-    file_handle.read_to_end(&mut buffer).await
-        .context("Failed to read the file")?;
-    log::info!("File contents: {:?}", buffer);
-    Ok(())
-}
-
+// use rs_openai::audio::Audio;
 async fn transcribe_audio(openai_key: &str, file_name: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
     log::info!("Audio: step 4: in transcribe_audio.");
-    let client = Client::new();
-    log::info!("File name: {}", file_name);
+    
+    // Initialize reqwest client
+    let client = reqwest::Client::new();
 
-    // Log the file contents for verification
-    if let Err(e) = log_file_contents(file_name).await {
-        log::error!("Failed to log file contents: {:?}", e);
-    }
+    // Open file
+    log::info!("Audio: step 4 initializing: opening file");
+    let file_path = std::path::Path::new(file_name);
+    let file = tokio::fs::File::open(file_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to open the file: {:?}", e))?;
+    
+    // Create a stream from the file
+    let bytes_stream = tokio_util::codec::FramedRead::new(file, tokio_util::codec::BytesCodec::new());
 
-    // Open the file and read its content into a buffer
-    let mut file_handle = tokio::fs::File::open(file_name).await
-        .context("Failed to open the file")?;
-    let mut buffer = Vec::new();
-    file_handle.read_to_end(&mut buffer).await
-        .context("Failed to read the file")?;
-
-    let mime_type_str = match mime_type {
-        Some(mime) => mime,
-        None => {
-            log::error!("MIME type is None");
-            anyhow::bail!("MIME type is not provided");
-        },
-    };
-
-    log::info!("MIME type: {}", mime_type_str);
+    // Wrap the stream into a multipart file part
+    let file_part = reqwest::multipart::Part::stream(reqwest::Body::wrap_stream(bytes_stream))
+        .file_name(file_name.to_string())
+        .mime_str(mime_type.expect("Couldn't give it a mime type"))?;
 
     // Create the multipart form
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
-        .part("file", reqwest::multipart::Part::bytes(buffer)
-            .file_name(file_name.to_string()) 
-            .mime_str(mime_type_str)?);
+        .part("file", file_part);
 
-    log::info!("Form data about to be sent: {:?}", form);
+    log::info!("Audio: step 4: sending request to OpenAI for transcription");
 
-    log::info!("Audio: step 4: successfully made file_part");
-    log::info!("beginning to send request to transcriptions");
-
-    let response = client
-        .post("https://api.openai.com/v1/audio/transcriptions")
+    // Send the POST request to the OpenAI API endpoint
+    let response = client.post("https://api.openai.com/v1/audio/transcriptions")
         .header("Authorization", format!("Bearer {}", openai_key))
         .multipart(form)
         .send()
         .await
         .context("Failed to send the request to OpenAI")?;
 
-    let response_status = response.status();
-    let response_text = response.text().await.unwrap_or_else(|_| String::from("Failed to read response text"));
-    
-    log::info!("Response status: {}", response_status);
-    log::info!("Response body: {}", response_text);
-    
-    if !response_status.is_success() {
-        anyhow::bail!("Received non-200 status code ({}) from OpenAI: {}", response_status, response_text);
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_else(|_| String::from("Failed to read response text"));
+        anyhow::bail!("Received non-200 status code ({}) from OpenAI: {}", status, text);
     }
 
-    let response_json: serde_json::Value = serde_json::from_str(&response_text)
+    // Parse the response body
+    let response_json: serde_json::Value = response.json().await
         .context("Failed to parse the response from OpenAI")?;
     let transcription = response_json["text"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Transcription not found in response"))?
         .to_string();
 
+    log::info!("audio message transcribed to: {}", transcription);
+
     Ok(transcription)
 }
+// async fn transcribe_audio(openai_key: &str, file_name: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
+//     log::info!("Audio: step 4: in transcribe_audio.");
+//     let client = Client::new();
+//     log::info!("File name: {}", file_name);
+
+//     // Open the file and read its content into a buffer
+//     log::info!("Audio: step 4 initializing: opening and reading file");
+//     let mut file_handle = tokio::fs::File::open(file_name).await
+//         .context("Failed to open the file")?;
+//     let mut buffer = Vec::new();
+//     file_handle.read_to_end(&mut buffer).await
+//         .context("Failed to read the file")?;
+
+//     let mime_type_str = match mime_type {
+//         Some(mime) => mime,
+//         None => {
+//             log::error!("MIME type is None");
+//             anyhow::bail!("MIME type is not provided");
+//         },
+//     };
+
+//     log::info!("MIME type: {}", mime_type_str);
+
+//     // Create the multipart form
+//     let file_part = reqwest::multipart::Part::bytes(buffer)
+//         .file_name(file_name.to_string())  // Use the original file name
+//         .mime_str(mime_type_str)?;  // Use the provided MIME type
+
+//     let form = reqwest::multipart::Form::new()
+//         .text("model", "whisper-1")
+//         .part("file", file_part);
+
+//     log::info!("Form data about to be sent: {:?}", form);
+
+//     log::info!("Audio: step 4: successfully made file_part");
+//     log::info!("beginning to send request to transcriptions");
+
+//     let response = client
+//         .post("https://api.openai.com/v1/audio/transcriptions")
+//         .header("Authorization", format!("Bearer {}", openai_key))
+//         .multipart(form)
+//         .send()
+//         .await
+//         .context("Failed to send the request to OpenAI")?;
+
+//     if !response.status().is_success() {
+//         let status = response.status();
+//         let text = response.text().await.unwrap_or_else(|_| String::from("Failed to read response text"));
+//         anyhow::bail!("Received non-200 status code ({}) from OpenAI: {}", status, text);
+//     }
+
+//     let response_json: serde_json::Value = response.json().await
+//         .context("Failed to parse the response from OpenAI")?;
+//     let transcription = response_json["text"]
+//         .as_str()
+//         .ok_or_else(|| anyhow::anyhow!("Transcription not found in response"))?
+//         .to_string();
+
+//     Ok(transcription)
+// }
 
 
 
