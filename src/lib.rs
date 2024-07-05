@@ -237,8 +237,8 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
     // Try to read the metadata with mp4ameta
     let tag = match mp4ameta::Tag::read_from_path(&filename) {
         Ok(tag) => tag,
-        Err(_) => {
-            let error_message = format!("File is corrupt: {}", filename);
+        Err(e) => {
+            let error_message = format!("File is corrupt: {}. Error: {:?}", filename, e);
             log::error!("{}", error_message);
             anyhow::bail!(error_message);
         }
