@@ -502,6 +502,8 @@ async fn transcribe_audio(openai_key: &str, file_name: &str, mime_type: Option<&
         .text("model", "whisper-1")
         .part("file", file_part);
 
+    log::info!("Form data about to be sent: {:?}", form);
+
     log::info!("Audio: step 4: successfully made file_part");
     log::info!("beginning to send request to transcriptions");
 
