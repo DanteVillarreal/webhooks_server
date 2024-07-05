@@ -145,6 +145,7 @@ async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, ope
     // Download the audio file from Telegram
     let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, &file_path_on_telegram);
     log::info!("Audio: step 3: about to download audio file");
+    log::info!("file_url is {file_url}");
     let file_name = download_file(&file_url, &audio.file_id, audio.mime_type.as_deref()).await?;
 
     // Call OpenAI API to transcribe audio
