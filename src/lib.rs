@@ -180,6 +180,7 @@ async fn get_file(bot_token: &str, file_id: &str) -> Result<String> {
     Ok(file_path)
 }
 
+
 async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
     log::info!("Audio: step 3: in download_file fn");
     
@@ -229,11 +230,22 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
         .bytes()
         .await
         .with_context(|| "Failed to read content from response".to_string())?;
+
+    log::info!("Size of content to be written: {}", content.len());
     
     // Write content to the file
     file.write_all(&content)
         .await
         .with_context(|| format!("Failed to write content to file: {}", filename))?;
+
+    // Ensure all intermediately buffered contents reach their destination.
+    file.flush()
+        .await
+        .with_context(|| format!("Failed to flush content to file: {}", filename))?;
+
+    // Get the size of the file after writing
+    let metadata = tokio::fs::metadata(&filename).await?;
+    log::info!("Size of file after writing: {}", metadata.len());
     
     // Try to read the metadata with mp4ameta
     let tag = match mp4ameta::Tag::read_from_path(&filename) {
@@ -251,6 +263,80 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
     log::info!("Audio: step 3 completed successfully");
     Ok(filename)
 }
+
+
+
+// async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
+//     log::info!("Audio: step 3: in download_file fn");
+    
+//     let client = Client::new();
+//     log::info!("Audio: step 3 initializing");
+    
+//     // Send POST request to the URL to GET the file_path
+//     let response = client
+//         .get(url)
+//         .send()
+//         .await
+//         .with_context(|| format!("Failed to send GET request to URL: {}", url))?;
+    
+//     // Ensure the request was successful
+//     if !response.status().is_success() {
+//         let error_message = format!("Received non-200 status code ({}) when trying to access URL: {}", response.status(), url);
+//         log::error!("{}", error_message);
+//         anyhow::bail!(error_message);
+//     }
+
+//     // Determine the file extension based on the MIME type
+//     let file_extension = match mime_type {
+//         Some("audio/flac") => "flac",
+//         Some("audio/m4a") => "m4a",
+//         Some("audio/mp3") => "mp3",
+//         Some("audio/mp4") => "mp4",
+//         Some("audio/mpeg") => "mpeg",
+//         Some("audio/mpga") => "mpga",
+//         Some("audio/oga") => "oga",
+//         Some("audio/webm") => "webm",
+//         Some("audio/wav") => "wav",
+//         Some("audio/ogg") => "ogg",
+//         // Add more MIME types and their corresponding file extensions as needed
+//         _ => "unknown",
+//     };
+
+//     let filename = format!("{}.{}", Uuid::new_v4(), file_extension);
+//     log::info!("Audio: step 3: in download_file. filename is {filename}");
+    
+//     // Create the file
+//     let mut file = File::create(&filename)
+//         .await
+//         .with_context(|| format!("Failed to create file: {}", filename))?;
+    
+//     // Extract the response content
+//     let content = response
+//         .bytes()
+//         .await
+//         .with_context(|| "Failed to read content from response".to_string())?;
+    
+//     // Write content to the file
+//     file.write_all(&content)
+//         .await
+//         .with_context(|| format!("Failed to write content to file: {}", filename))?;
+    
+//     // Try to read the metadata with mp4ameta
+//     let tag = match mp4ameta::Tag::read_from_path(&filename) {
+//         Ok(tag) => tag,
+//         Err(e) => {
+//             let error_message = format!("File is corrupt: {}. Error: {:?}", filename, e);
+//             log::error!("{}", error_message);
+//             anyhow::bail!(error_message);
+//         }
+//     };
+
+//     log::info!("Audio: step 3: in download_file: Audio file metadata: {:?}", tag);
+//     log::info!("Audio: step 3: if it got here, file is not corrupt");
+    
+//     log::info!("Audio: step 3 completed successfully");
+//     Ok(filename)
+// }
 
 
 // async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Result<String, anyhow::Error> {
