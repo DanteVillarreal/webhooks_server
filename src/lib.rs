@@ -207,7 +207,7 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
         Some("audio/m4a") => "m4a",
         Some("audio/mp3") => "mp3",
         Some("audio/mp4") => "mp4",
-        Some("audio/mpeg") => "mp3",
+        Some("audio/mpeg") => "mp",
         Some("audio/mpga") => "mpga",
         Some("audio/oga") => "oga",
         Some("audio/webm") => "webm",
@@ -247,19 +247,21 @@ async fn download_file(url: &str, file_id: &str, mime_type: Option<&str>) -> Res
     let metadata = tokio::fs::metadata(&filename).await?;
     log::info!("Size of file after writing: {}", metadata.len());
     
-    // Try to read the metadata with mp4ameta
-    let tag = match mp4ameta::Tag::read_from_path(&filename) {
-        Ok(tag) => tag,
-        Err(e) => {
-            let error_message = format!("File is corrupt: {}. Error: {:?}", filename, e);
-            log::error!("{}", error_message);
-            anyhow::bail!(error_message);
-        }
-    };
+    if mime_type.unwrap() == "audio/m4a" {
+        // Try to read the metadata with mp4ameta
+        let tag = match mp4ameta::Tag::read_from_path(&filename) {
+            Ok(tag) => tag,
+            Err(e) => {
+                let error_message = format!("File is corrupt: {}. Error: {:?}", filename, e);
+                log::error!("{}", error_message);
+                anyhow::bail!(error_message);
+            }
+        };
+   
 
-    log::info!("Audio: step 3: in download_file: Audio file metadata: {:?}", tag);
-    log::info!("Audio: step 3: if it got here, file is not corrupt");
-    
+        log::info!("Audio: step 3: in download_file: Audio file metadata: {:?}", tag);
+        log::info!("Audio: step 3: if it got here, file is not corrupt");
+    }
     log::info!("Audio: step 3 completed successfully");
     Ok(filename)
 }
