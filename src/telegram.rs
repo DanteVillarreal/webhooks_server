@@ -5,101 +5,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler};
+use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message};
 use crate::{User, Chat, Audio};
 use anyhow::anyhow;
 use crate::Message as CustomMessage; // Alias your Message type to avoid name conflicts
-use teloxide::types::{ChatKind};
+//use teloxide::types::{ChatKind};
 
-// pub async fn run_telegram_bot() {
-//     let bot = Bot::from_env();
-//     let user_assistant_map: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
-
-//     let cloned_map = Arc::clone(&user_assistant_map);
-//     teloxide::repl(bot, move |message: teloxide::types::Message, bot: Bot| {
-//         let user_assistant_map = Arc::clone(&cloned_map);
-//         async move {
-//             if let Some(text) = message.text() {
-//                 if text == "/list_assistants" {
-//                     match list_assistants().await {
-//                         Ok(response) => {
-//                             bot.send_message(message.chat.id, response).await?;
-//                         }
-//                         Err(e) => {
-//                             bot.send_message(message.chat.id, format!("Error: {:?}", e)).await?;
-//                         }
-//                     }
-//                 } else if text.starts_with("/create_assistant") {
-//                     let assistant_name = text.trim_start_matches("/create_assistant").trim();
-//                     match create_assistant(assistant_name).await {
-//                         Ok(response) => {
-//                             bot.send_message(message.chat.id, response).await?;
-//                         }
-//                         Err(e) => {
-//                             bot.send_message(message.chat.id, format!("Error: {:?}", e)).await?;
-//                         }
-//                     }
-//                 } else if text.starts_with("/use_assistant") {
-//                     if let Some(user_id) = message.from().map(|user| user.id) {
-//                         let assistant_id = text.trim_start_matches("/use_assistant").trim().to_string();
-//                         let mut map = user_assistant_map.lock().await;
-//                         map.insert(user_id.0, assistant_id.clone());
-//                         bot.send_message(message.chat.id, format!("Switched to assistant: {}", assistant_id)).await?;
-//                     }
-//                 } else {
-//                     if let Some(user_id) = message.from().map(|user| user.id) {
-//                         let map = user_assistant_map.lock().await;
-//                         let assistant_id = map.get(&user_id.0).cloned().unwrap_or_else(|| "default_assistant_id".to_string());
-//                         let response = call_openai_api(&assistant_id, text).await; // Use assistant_id here.
-//                         bot.send_message(message.chat.id, response).await?;
-//                     }
-//                 }
-//             }
-//             respond(())
-//         }
-//     })
-//     .await;
-// }
 
 // Global HashMap to store user_id to thread_id mappings
 lazy_static::lazy_static! {
     static ref USER_THREADS: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
-//use log::{info, error}; // Import logging macros
 
-// pub async fn run_telegram_bot() {
-//     let bot = Bot::from_env();
-//     info!("Bot started");
-//     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
-//     let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
-
-//     teloxide::repl(bot.clone(), move |message: Message, bot: Bot| {
-//         let openai_key = openai_key.clone();
-//         let assistant_id = assistant_id.clone();
-
-//         async move {
-//             if let Some(text) = message.text() {
-//                 info!("Received message: {}", text);
-
-//                 // Use first_loop to handle the OpenAI interactions
-//                 let response = match first_loop(&openai_key, text, &assistant_id).await {
-//                     Ok(response) => response,
-//                     Err(e) => {
-//                         log::error!("Failed to process message: {}", e);
-//                         "Failed to process message. Please try again later.".to_string()
-//                     }
-//                 };
-
-//                 // Send the response back to the user
-//                 if let Err(e) = bot.send_message(message.chat.id, response).await {
-//                     log::error!("Failed to send message to Telegram: {}", e);
-//                 }
-//             }
-//             respond(())
-//         }
-//     }).await;
-// }
 async fn get_file_path(file_id: &str, bot_token: &str) -> Result<String, anyhow::Error> {
     let url = format!("https://api.telegram.org/bot{}/getFile?file_id={}", bot_token, file_id);
 
@@ -158,7 +76,7 @@ pub async fn run_telegram_bot() {
     log::info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
     let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
-
+    
     teloxide::repl(bot.clone(), move |message: teloxide::prelude::Message, bot: Bot| {
         let openai_key = openai_key.clone();
         let assistant_id = assistant_id.clone();
@@ -217,8 +135,48 @@ pub async fn run_telegram_bot() {
                     match get_file_path(&custom_audio.file_id, &bot_token).await {
                         Ok(file_path) => {
                             custom_audio.file_path = Some(file_path);
-                            handle_message_handler(custom_message, openai_key.clone()).await;
-                            bot.send_message(chat_id, "Processing your audio message...").await?;
+                            match handle_audio_message(&bot_token,  &custom_audio, &openai_key).await {
+                                Ok(transcription) => {
+                                    // Now handle the transcription as if it was a text message from the user
+                                    let user_id = message.from().map(|user| user.id.0).unwrap_or(0);
+                                    let response = {
+                                        let mut user_threads = USER_THREADS.lock().await;
+                                        let maybe_thread_id = user_threads.get(&user_id).cloned();
+    
+                                        match maybe_thread_id {
+                                            Some(existing_thread_id) => {
+                                                second_message_and_so_on(&openai_key, &existing_thread_id, &transcription, &assistant_id).await
+                                            },
+                                            None => {
+                                                match create_openai_thread(&openai_key, &transcription).await {
+                                                    Ok(new_thread_id) => {
+                                                        user_threads.insert(user_id, new_thread_id.clone());
+                                                        first_loop(&openai_key, &new_thread_id, &assistant_id).await
+                                                    },
+                                                    Err(e) => {
+                                                        log::error!("Failed to create thread: {}", e);
+                                                        Err(anyhow!("Failed to create thread"))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    };
+    
+                                    match response {
+                                        Ok(response) => {
+                                            bot.send_message(chat_id, response).await?;
+                                        },
+                                        Err(e) => {
+                                            log::error!("Failed to process message: {}", e);
+                                            bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
+                                        }
+                                    };
+                                },
+                                Err(e) => {
+                                    log::error!("Failed to handle audio message: {:?}", e);
+                                    bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
+                                }
+                            }
                         },
                         Err(e) => {
                             log::error!("Failed to retrieve file path: {:?}", e);
@@ -227,10 +185,93 @@ pub async fn run_telegram_bot() {
                     }
                 }
             }
+    
             respond(())
         }
     }).await;
 }
+
+
+
+
+// pub async fn run_telegram_bot() {
+//     let bot = Bot::from_env();
+//     log::info!("Bot started");
+//     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
+//     let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
+
+//     teloxide::repl(bot.clone(), move |message: teloxide::prelude::Message, bot: Bot| {
+//         let openai_key = openai_key.clone();
+//         let assistant_id = assistant_id.clone();
+//         let bot_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
+    
+//         async move {
+//             if let Some(text) = message.text() {
+//                 log::info!("Received message: {}", text);
+    
+//                 // Get user ID
+//                 let user_id = message.from().map(|user| user.id.0).unwrap_or(0);
+    
+//                 // Async block to handle user-specific thread logic
+//                 let response = {
+//                     let mut user_threads = USER_THREADS.lock().await;
+//                     let maybe_thread_id = user_threads.get(&user_id).cloned();
+    
+//                     match maybe_thread_id {
+//                         Some(existing_thread_id) => {
+//                             // Use existing thread ID and process subsequent messages
+//                             second_message_and_so_on(&openai_key, &existing_thread_id, text, &assistant_id).await
+//                         },
+//                         None => {
+//                             // Create new thread and process the initial message
+//                             match create_openai_thread(&openai_key, text).await {
+//                                 Ok(new_thread_id) => {
+//                                     user_threads.insert(user_id, new_thread_id.clone());
+//                                     first_loop(&openai_key, &new_thread_id, &assistant_id).await
+//                                 },
+//                                 Err(e) => {
+//                                     log::error!("Failed to create thread: {}", e);
+//                                     Err(anyhow!("Failed to create thread"))
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 };
+    
+//                 // Send the response back to the Telegram user
+//                 match response {
+//                     Ok(response) => {
+//                         bot.send_message(message.chat.id, response).await?;
+//                     },
+//                     Err(e) => {
+//                         log::error!("Failed to process message: {}", e);
+//                         bot.send_message(message.chat.id, "Failed to process message. Please try again later.").await?;
+//                     }
+//                 };
+//             } else if let Some(audio) = message.audio() {
+//                 log::info!("Received audio message");
+    
+//                 let mut custom_message = convert_teloxide_message_to_custom(message.clone());  // Clone message for re-use
+//                 let chat_id = message.chat.id;
+    
+//                 if let Some(ref mut custom_audio) = &mut custom_message.audio {
+//                     match get_file_path(&custom_audio.file_id, &bot_token).await {
+//                         Ok(file_path) => {
+//                             custom_audio.file_path = Some(file_path);
+//                             handle_message_handler(custom_message, openai_key.clone()).await;
+//                             bot.send_message(chat_id, "Processing your audio message...").await?;
+//                         },
+//                         Err(e) => {
+//                             log::error!("Failed to retrieve file path: {:?}", e);
+//                             bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
+//                         }
+//                     }
+//                 }
+//             }
+//             respond(())
+//         }
+//     }).await;
+// }
 
 
 
