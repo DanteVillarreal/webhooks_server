@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message};
-use crate::{User, Chat, Audio};
+use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message, handle_voice_message};
+use crate::{User, Chat, Audio, Voice};
 use anyhow::anyhow;
 use crate::Message as CustomMessage; // Alias your Message type to avoid name conflicts
 //use teloxide::types::{ChatKind};
@@ -68,6 +68,14 @@ fn convert_teloxide_message_to_custom(message: teloxide::prelude::Message) -> Cu
             file_path: None,  // Initially None, to be fetched later
             mime_type: audio.mime_type.as_ref().map(|mime| mime.to_string()),  // Convert Mime to String
             //mime_type: audio.mime_type.clone(), //doesnt work because is type mime
+        }),
+        voice: message.voice().map(|voice| Voice {
+            file_id: voice.file.id.clone(),  // Access the `file_id`
+            file_unique_id: voice.file.unique_id.clone(),  // Access the `file_unique_id`
+            duration: voice.duration as u64,
+            file_size: Some(voice.file.size as u64),  // Convert and set file_size
+            mime_type: voice.mime_type.as_ref().map(|mime| mime.to_string()),  // Convert Mime to String
+            file_path: None,  // Initially None, to be fetched later
         }),
     }
 }
@@ -182,6 +190,64 @@ pub async fn run_telegram_bot() {
                             Err(e) => {
                                 log::error!("Failed to retrieve file path: {:?}", e);
                                 bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
+                            }
+                        }
+                    }
+                } else if let Some(voice) = message.voice() {
+                    log::info!("Received voice message");
+
+                    let mut custom_message = convert_teloxide_message_to_custom(message.clone());
+                    let chat_id = message.chat.id;
+
+                    if let Some(ref mut custom_voice) = &mut custom_message.voice {
+                        match get_file_path(&custom_voice.file_id, &bot_token).await {
+                            Ok(file_path) => {
+                                custom_voice.file_path = Some(file_path);
+                                match handle_voice_message(&bot_token, &custom_voice, &openai_key).await {
+                                    Ok(transcription) => {
+                                        let user_id = message.from().map(|user| user.id.0).unwrap_or(0);
+                                        let response = {
+                                            let mut user_threads = USER_THREADS.lock().await;
+                                            let maybe_thread_id = user_threads.get(&user_id).cloned();
+
+                                            match maybe_thread_id {
+                                                Some(existing_thread_id) => {
+                                                    second_message_and_so_on(&openai_key, &existing_thread_id, &transcription, &assistant_id).await
+                                                },
+                                                None => {
+                                                    match create_openai_thread(&openai_key, &transcription).await {
+                                                        Ok(new_thread_id) => {
+                                                            user_threads.insert(user_id, new_thread_id.clone());
+                                                            first_loop(&openai_key, &new_thread_id, &assistant_id).await
+                                                        },
+                                                        Err(e) => {
+                                                            log::error!("Failed to create thread: {}", e);
+                                                            Err(anyhow!("Failed to create thread"))
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        };
+
+                                        match response {
+                                            Ok(response) => {
+                                                bot.send_message(chat_id, response).await?;
+                                            },
+                                            Err(e) => {
+                                                log::error!("Failed to process message: {}", e);
+                                                bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
+                                            }
+                                        }
+                                    },
+                                    Err(e) => {
+                                        log::error!("Failed to handle voice message: {:?}", e);
+                                        bot.send_message(chat_id, "Failed to process your voice message. Please try again later.").await?;
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                log::error!("Failed to retrieve file path: {:?}", e);
+                                bot.send_message(chat_id, "Failed to process your voice message. Please try again later.").await?;
                             }
                         }
                     }

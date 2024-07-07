@@ -29,6 +29,7 @@ pub struct Message {
     pub date: u64,
     pub text: Option<String>,
     pub audio: Option<Audio>,
+    pub voice: Option<Voice>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -58,6 +59,16 @@ pub struct Chat {
     pub username: Option<String>,
     #[serde(rename = "type")]
     pub type_: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Voice {
+    pub file_id: String,
+    pub file_unique_id: String,
+    pub duration: u64,
+    pub mime_type: Option<String>,
+    pub file_size: Option<u64>,
+    pub file_path: Option<String>,
 }
 
 
@@ -90,6 +101,9 @@ pub async fn handle_message(message: Message, openai_key: String, ) -> Result<()
     } else if let Some(ref audio) = message.audio {
         log::info!("about to handle message as audio");
         handle_audio_message(&bot_token, audio, &openai_key).await?;
+    } else if let Some(ref voice) = message.voice {
+        log::info!("about to handle message as voice");
+        handle_voice_message(&bot_token, voice, &openai_key).await?;
     }
 
     Ok(())
@@ -130,6 +144,25 @@ async fn handle_audio_message(bot_token: &str, audio: &Audio, openai_key: &str) 
     log::info!("audio message transcribed to: {}", transcription);
 
     // Return the transcription instead of sending it to Telegram
+    Ok(transcription)
+}
+async fn handle_voice_message(bot_token: &str, voice: &Voice, openai_key: &str) -> Result<String, anyhow::Error> {
+    log::info!("Voice: step 2: In handle_voice_message fn");
+
+    // Get the file path from Telegram using the get_file function
+    let file_path_on_telegram = get_file(bot_token, &voice.file_id).await?;
+    log::info!("Voice: step 2: In handle_voice_message. got file path: {}", file_path_on_telegram);
+
+    // Download the voice file from Telegram
+    let file_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, file_path_on_telegram);
+    log::info!("Voice: step 3: about to download voice file");
+    let file_name = download_file(&file_url, &voice.file_id, voice.mime_type.as_deref()).await?;
+
+    // Call OpenAI API to transcribe voice
+    log::info!("Voice: step 4: about to transcribe the voice message");
+    let transcription = transcribe_audio(openai_key, &file_name, voice.mime_type.as_deref()).await?;
+    log::info!("voice message transcribed to: {}", transcription);
+
     Ok(transcription)
 }
 // async fn handle_audio_message(bot_token: &str, chat_id: &u64, audio: &Audio, openai_key: &str) -> Result<(), anyhow::Error> {
