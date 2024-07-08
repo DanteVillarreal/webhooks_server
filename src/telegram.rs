@@ -84,7 +84,7 @@ pub async fn run_telegram_bot() {
     let bot = Bot::from_env();
     log::info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
-    let assistant_id = "asst_i3Rp5qhi8FtzZLBJ0Ibhr8ql".to_string();
+    let assistant_id = "asst_ybfxpPMxcuj7GZkwELR6sttt".to_string();
     
     teloxide::repl(bot.clone(), move |message: teloxide::prelude::Message, bot: Bot| {
         let openai_key = openai_key.clone();
