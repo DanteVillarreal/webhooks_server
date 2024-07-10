@@ -147,7 +147,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                     let thread_id = match thread_id_result {
                         Ok(id) => id,
                         Err(e) => {
-                            log::error!("Failed to get or create thread ID: {}", e);
+                            log::error!("Text: Failed to get or create thread ID: {}", e);
                             return Ok(());
                         }
                     };
@@ -212,7 +212,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                         let thread_id = match thread_id_result {
                                             Ok(id) => id,
                                             Err(e) => {
-                                                log::error!("Failed to get or create thread ID: {}", e);
+                                                log::error!("Audio: Failed to get or create thread ID: {}", e);
                                                 return Err(anyhow!("Failed to get or create thread"));
                                             }
                                         };
