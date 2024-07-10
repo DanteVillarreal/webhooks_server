@@ -42,3 +42,22 @@ pub async fn insert_message(pool: deadpool_postgres::Pool, thread_id: &str, send
 
     Ok(())
 }
+
+pub async fn get_thread_by_user_id(pool: deadpool_postgres::Pool, user_id: i64) -> Result<Option<String>, anyhow::Error> {
+    // Get a client from the pool, handling the pool error explicitly
+    let client = pool.get().await.map_err(|e| {
+        log::error!("Failed to get client from pool: {:?}", e);
+        anyhow::Error::new(e)
+    })?;
+
+    // Fetch the thread_id for the given user_id, if it exists
+    let stmt = "SELECT thread_id FROM threads WHERE user_id = $1";
+    let row = client.query_opt(stmt, &[&user_id]).await?;
+
+    // Extract thread_id from the row, if it exists
+    if let Some(row) = row {
+        Ok(Some(row.get("thread_id")))
+    } else {
+        Ok(None)
+    }
+}
