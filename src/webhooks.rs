@@ -4,7 +4,7 @@ use warp::Filter;
 use crate::{WebhookPayload, handle_message_handler};
 use std::env;
 
-pub async fn run_webhook_server() {
+pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
 
     // POST /webhook

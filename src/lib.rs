@@ -13,6 +13,7 @@ use anyhow::Context;
 use anyhow::Result;
 pub mod webhooks;
 pub mod telegram;
+pub mod database;
 use serde_json::Value;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -71,7 +72,13 @@ pub struct Voice {
     pub file_path: Option<String>,
 }
 
-
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DBUser {
+    pub id: i64,  // Change to i64
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub username: Option<String>,
+}
 
 
 
