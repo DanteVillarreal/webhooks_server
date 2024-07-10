@@ -14,8 +14,7 @@ pub async fn insert_user(pool: deadpool_postgres::Pool, user: crate::DBUser) -> 
     Ok(())
 }
 
-pub async fn insert_thread(pool: deadpool_postgres::Pool, thread_id: i32, user_id: i64, openai_thread_id: &str) -> Result<(), anyhow::Error> {
-    // Get a client from the pool, handling the pool error explicitly
+pub async fn insert_thread(pool: deadpool_postgres::Pool, thread_id: &str, user_id: i64, openai_thread_id: &str) -> Result<(), anyhow::Error> {
     let client = pool.get().await.map_err(|e| {
         log::error!("Failed to get client from pool: {:?}", e);
         anyhow::Error::new(e)
@@ -30,8 +29,7 @@ pub async fn insert_thread(pool: deadpool_postgres::Pool, thread_id: i32, user_i
     Ok(())
 }
 
-pub async fn insert_message(pool: deadpool_postgres::Pool, thread_id: i32, sender: &str, content: &str, message_type: &str) -> Result<(), anyhow::Error> {
-    // Get a client from the pool, handling the pool error explicitly
+pub async fn insert_message(pool: deadpool_postgres::Pool, thread_id: &str, sender: &str, content: &str, message_type: &str) -> Result<(), anyhow::Error> {
     let client = pool.get().await.map_err(|e| {
         log::error!("Failed to get client from pool: {:?}", e);
         anyhow::Error::new(e)

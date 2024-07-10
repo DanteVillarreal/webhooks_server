@@ -9,6 +9,7 @@ use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_
 use crate::{User, Chat, Audio, Voice};
 use anyhow::anyhow;
 use crate::Message as CustomMessage; // Alias your Message type to avoid name conflicts
+use crate::database::{insert_thread, insert_message};
 //use teloxide::types::{ChatKind};
 
 
@@ -94,56 +95,60 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
         let pool = pool.clone();
 
         async move {
-            // Insert or update user in the database
             let result = async {
-                // Extract user ID
                 let user_id = message.from()
                     .ok_or_else(|| anyhow!("User not found in message"))
                     .map(|user| user.id.0 as i64)?;
 
-                // Create user object
                 let db_user = crate::DBUser {
                     id: user_id,
-                    first_name: Some(message.from().unwrap().first_name.clone()),
-                    last_name: message.from().unwrap().last_name.clone(),
-                    username: message.from().unwrap().username.clone(),
+                    first_name: Some(message.from().unwrap().first_name.clone()), // value from Telegram API, always Some
+                    last_name: Some(message.from().unwrap().last_name.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
+                    username: Some(message.from().unwrap().username.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
                 };
+                
+                // Log the user details
+                log::info!(
+                    "Preparing to insert user: id={} first_name={} last_name={} username={}",
+                    user_id,
+                    message.from().unwrap().first_name.clone(),
+                    message.from().unwrap().last_name.clone().unwrap_or("N/A".to_string()),
+                    message.from().unwrap().username.clone().unwrap_or("N/A".to_string()),
+                );
 
-                // Insert or update user in the database
                 if let Err(e) = crate::database::insert_user(pool.clone(), db_user).await {
                     log::error!("Failed to insert or update user: {:?}", e);
                 }
 
                 if let Some(text) = message.text() {
                     log::info!("Received message: {}", text);
-                
-                    // Initialize thread ID and handle message response
-                    let thread_id_result = {
+
+                    let thread_id_result: Result<String, anyhow::Error>;
+                    {
                         let mut user_threads = USER_THREADS.lock().await;
                         let maybe_thread_id = user_threads.get(&(user_id as u64)).cloned();
-                
+
                         match maybe_thread_id {
                             Some(existing_thread_id) => {
-                                existing_thread_id.parse::<i32>().map_err(|e| anyhow!("Failed to parse thread ID: {:?}", e))
+                                thread_id_result = Ok(existing_thread_id);
                             },
                             None => {
                                 match create_openai_thread(&openai_key, text).await {
                                     Ok(new_thread_id) => {
                                         user_threads.insert(user_id as u64, new_thread_id.clone());
-                                        let thread_id_result = new_thread_id.parse::<i32>().map_err(|e| anyhow!("Failed to parse thread ID: {:?}", e));
-                                        if let Ok(thread_id_value) = thread_id_result {
-                                            if let Err(e) = crate::database::insert_thread(pool.clone(), thread_id_value, user_id, &new_thread_id).await {
-                                                log::error!("Failed to insert or update thread: {:?}", e);
-                                            }
+                                        if let Err(e) = insert_thread(pool.clone(), &new_thread_id, user_id, &new_thread_id).await {
+                                            log::error!("Failed to insert or update thread: {:?}", e);
                                         }
-                                        thread_id_result
+                                        thread_id_result = Ok(new_thread_id);
                                     },
-                                    Err(e) => Err(anyhow!("Failed to create thread: {}", e)),
+                                    Err(e) => {
+                                        thread_id_result = Err(anyhow!("Failed to create thread: {}", e));
+                                    },
                                 }
                             }
                         }
-                    };
-                
+                    }
+
                     let thread_id = match thread_id_result {
                         Ok(id) => id,
                         Err(e) => {
@@ -151,18 +156,16 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                             return Ok(());
                         }
                     };
-                
-                    let response_result = second_message_and_so_on(&openai_key, &thread_id.to_string(), text, &assistant_id).await;
-                
-                    // Log the user's message
-                    if let Err(e) = crate::database::insert_message(pool.clone(), thread_id, "user", text, "text").await {
+
+                    if let Err(e) = insert_message(pool.clone(), &thread_id, "user", text, "text").await {
                         log::error!("Failed to log user message: {:?}", e);
                     }
-                
-                    // Send the response back to the Telegram user and log it
+
+                    let response_result = second_message_and_so_on(&openai_key, &thread_id, text, &assistant_id).await;
+
                     match response_result {
                         Ok(response_value) => {
-                            if let Err(e) = crate::database::insert_message(pool.clone(), thread_id, "assistant", &response_value, "text").await {
+                            if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text").await {
                                 log::error!("Failed to log assistant message: {:?}", e);
                             }
                             bot.send_message(message.chat.id, response_value).await?;
@@ -171,7 +174,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                             log::error!("Failed to process message: {:?}", e);
                             bot.send_message(message.chat.id, "Failed to process message. Please try again later.").await?;
                         }
-                    };
+                    }
                 } else if let Some(audio) = message.audio() {
                     log::info!("Received audio message");
                 
@@ -184,30 +187,31 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                 custom_audio.file_path = Some(file_path);
                                 match handle_audio_message(&bot_token, &custom_audio, &openai_key).await {
                                     Ok(transcription) => {
-                                        let user_id = message.from().map(|user| user.id.0).ok_or_else(|| anyhow!("User ID not found"))?;
-                                        let thread_id_result = {
+                                        let thread_id_result: Result<String, anyhow::Error>;
+                                        {
                                             let mut user_threads = USER_THREADS.lock().await;
-                                            let maybe_thread_id = user_threads.get(&user_id).cloned();
+                                            let maybe_thread_id = user_threads.get(&(user_id as u64)).cloned();
                 
                                             match maybe_thread_id {
-                                                Some(existing_thread_id) => existing_thread_id.parse::<i32>().map_err(|e| anyhow!("Failed to parse thread ID: {:?}", e)),
+                                                Some(existing_thread_id) => {
+                                                    thread_id_result = Ok(existing_thread_id);
+                                                },
                                                 None => {
                                                     match create_openai_thread(&openai_key, &transcription).await {
                                                         Ok(new_thread_id) => {
-                                                            user_threads.insert(user_id, new_thread_id.clone());
-                                                            let thread_id_result = new_thread_id.parse::<i32>().map_err(|e| anyhow!("Failed to parse thread ID: {:?}", e));
-                                                            if let Ok(thread_id_value) = thread_id_result {
-                                                                if let Err(e) = crate::database::insert_thread(pool.clone(), thread_id_value, user_id as i64, &new_thread_id).await {
-                                                                    log::error!("Failed to insert or update thread: {:?}", e);
-                                                                }
+                                                            user_threads.insert(user_id as u64, new_thread_id.clone());
+                                                            if let Err(e) = insert_thread(pool.clone(), &new_thread_id, user_id, &new_thread_id).await {
+                                                                log::error!("Failed to insert or update thread: {:?}", e);
                                                             }
-                                                            thread_id_result
+                                                            thread_id_result = Ok(new_thread_id);
                                                         },
-                                                        Err(e) => Err(anyhow!("Failed to create thread: {}", e)),
+                                                        Err(e) => {
+                                                            thread_id_result = Err(anyhow!("Failed to create thread: {}", e));
+                                                        }
                                                     }
                                                 }
                                             }
-                                        };
+                                        }
                 
                                         let thread_id = match thread_id_result {
                                             Ok(id) => id,
@@ -217,15 +221,15 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                             }
                                         };
                 
-                                        if let Err(e) = crate::database::insert_message(pool.clone(), thread_id, "user", &transcription, "audio").await {
+                                        if let Err(e) = insert_message(pool.clone(), &thread_id, "user", &transcription, "audio").await {
                                             log::error!("Failed to log user message: {:?}", e);
                                         }
                 
-                                        let response_result = second_message_and_so_on(&openai_key, &thread_id.to_string(), &transcription, &assistant_id).await;
+                                        let response_result = second_message_and_so_on(&openai_key, &thread_id, &transcription, &assistant_id).await;
                 
                                         match response_result {
                                             Ok(response_value) => {
-                                                if let Err(e) = crate::database::insert_message(pool.clone(), thread_id, "assistant", &response_value, "text").await {
+                                                if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text").await {
                                                     log::error!("Failed to log assistant message: {:?}", e);
                                                 }
                 
@@ -251,68 +255,69 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                     }
                 } else if let Some(voice) = message.voice() {
                     log::info!("Received voice message");
-
+                
                     let mut custom_message = convert_teloxide_message_to_custom(message.clone());
                     let chat_id = message.chat.id;
-
+                
                     if let Some(ref mut custom_voice) = &mut custom_message.voice {
                         match get_file_path(&custom_voice.file_id, &bot_token).await {
                             Ok(file_path) => {
                                 custom_voice.file_path = Some(file_path);
                                 match handle_voice_message(&bot_token, &custom_voice, &openai_key).await {
                                     Ok(transcription) => {
-                                        let response;
-                                        let mut thread_id: Result<i32, anyhow::Error> = Err(anyhow!("Missing thread ID"));
-                                        let user_id = message.from().map(|user| user.id.0).ok_or_else(|| anyhow!("User ID not found"))?;
-
+                                        let thread_id_result: Result<String, anyhow::Error>;
                                         {
                                             let mut user_threads = USER_THREADS.lock().await;
-                                            let maybe_thread_id = user_threads.get(&user_id).cloned();
-
+                                            let maybe_thread_id = user_threads.get(&(user_id as u64)).cloned();
+                
                                             match maybe_thread_id {
                                                 Some(existing_thread_id) => {
-                                                    thread_id = existing_thread_id.parse::<i32>().map_err(|e| anyhow!("Failed to parse thread ID: {:?}", e));
-                                                    response = second_message_and_so_on(&openai_key, &existing_thread_id, &transcription, &assistant_id).await;
+                                                    thread_id_result = Ok(existing_thread_id);
                                                 },
                                                 None => {
                                                     match create_openai_thread(&openai_key, &transcription).await {
                                                         Ok(new_thread_id) => {
-                                                            user_threads.insert(user_id, new_thread_id.clone());
-                                                            thread_id = new_thread_id.parse::<i32>().map_err(|e| anyhow!("Failed to parse thread ID: {:?}", e));
-                                                            if let Ok(thread_id_value) = thread_id {
-                                                                if let Err(e) = crate::database::insert_thread(pool.clone(), thread_id_value, user_id as i64, &new_thread_id).await {
-                                                                    log::error!("Failed to insert or update thread: {:?}", e);
-                                                                }
+                                                            user_threads.insert(user_id as u64, new_thread_id.clone());
+                                                            if let Err(e) = insert_thread(pool.clone(), &new_thread_id, user_id, &new_thread_id).await {
+                                                                log::error!("Failed to insert or update thread: {:?}", e);
                                                             }
-                                                            response = first_loop(&openai_key, &new_thread_id, &assistant_id).await;
+                                                            thread_id_result = Ok(new_thread_id);
                                                         },
                                                         Err(e) => {
-                                                            log::error!("Failed to create thread: {}", e);
-                                                            return Err(anyhow!("Failed to create thread"));
+                                                            thread_id_result = Err(anyhow!("Failed to create thread: {}", e));
                                                         }
                                                     }
                                                 }
                                             }
                                         }
-
-                                        let thread_id_value = thread_id?;
-                                        if let Err(e) = crate::database::insert_message(pool.clone(), thread_id_value, "user", &transcription, "voice").await {
-                                            log::error!("Failed to log user message: {:?}", e);
-                                        }
-
-                                        match response {
-                                            Ok(response) => {
-                                                if let Err(e) = crate::database::insert_message(pool.clone(), thread_id_value, "assistant", &response, "text").await {
-                                                    log::error!("Failed to log assistant message: {:?}", e);
-                                                }
-
-                                                bot.send_message(chat_id, response).await?;
-                                            },
+                
+                                        let thread_id = match thread_id_result {
+                                            Ok(id) => id,
                                             Err(e) => {
-                                                log::error!("Failed to process message: {}", e);
-                                                bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
+                                                log::error!("Voice: Failed to get or create thread ID: {}", e);
+                                                return Err(anyhow!("Failed to get or create thread"));
                                             }
                                         };
+                
+                                        if let Err(e) = insert_message(pool.clone(), &thread_id, "user", &transcription, "voice").await {
+                                            log::error!("Failed to log user message: {:?}", e);
+                                        }
+                
+                                        let response_result = second_message_and_so_on(&openai_key, &thread_id, &transcription, &assistant_id).await;
+                
+                                        match response_result {
+                                            Ok(response_value) => {
+                                                if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text").await {
+                                                    log::error!("Failed to log assistant message: {:?}", e);
+                                                }
+                
+                                                bot.send_message(chat_id, response_value).await?;
+                                            },
+                                            Err(e) => {
+                                                log::error!("Failed to process message: {:?}", e);
+                                                bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
+                                            }
+                                        }
                                     },
                                     Err(e) => {
                                         log::error!("Failed to handle voice message: {:?}", e);
