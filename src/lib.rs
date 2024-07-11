@@ -15,6 +15,8 @@ pub mod webhooks;
 pub mod telegram;
 pub mod database;
 use serde_json::Value;
+use rand::SeedableRng;
+
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct WebhookPayload {
@@ -713,5 +715,17 @@ pub async fn send_next_message(thread_id: &str, text: &str) -> anyhow::Result<()
     {}", response_text);
 
     Ok(())
+}
+
+// Function to introduce a random delay between 10 and 20 seconds
+async fn introduce_delay() {
+    // Create an instance of StdRng from entropy using the fully qualified path
+    let mut rng = rand::rngs::StdRng::from_entropy();
+    
+    // Use the fully qualified path for the gen_range method to specify that it belongs to the Rng trait
+    let delay_seconds: u64 = rand::Rng::gen_range(&mut rng, 10..=20);
+    
+    // Use the fully qualified path for sleep and Duration functions
+    tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds)).await;
 }
 

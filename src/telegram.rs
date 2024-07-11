@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message, handle_voice_message};
+use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message, handle_voice_message, introduce_delay};
 use crate::{User, Chat, Audio, Voice};
 use anyhow::anyhow;
 use crate::Message as CustomMessage; // Alias your Message type to avoid name conflicts
@@ -130,6 +130,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                 
                     match response_result {
                         Ok(response_value) => {
+                            introduce_delay().await;
                             if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
                                 log::error!("Failed to log assistant message: {:?}", e);
                             }
@@ -169,6 +170,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                 
                                         match response_result {
                                             Ok(response_value) => {
+                                                introduce_delay().await;
                                                 if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
                                                     log::error!("Failed to log assistant message: {:?}", e);
                                                 }
@@ -222,6 +224,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                 
                                         match response_result {
                                             Ok(response_value) => {
+                                                introduce_delay().await;
                                                 if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
                                                     log::error!("Failed to log assistant message: {:?}", e);
                                                 }
