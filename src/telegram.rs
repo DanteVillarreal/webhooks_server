@@ -115,15 +115,19 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                 // Handle user message text
                 if let Some(text) = message.text() {
                     log::info!("Received message: {}", text);
-
-                    let thread_id = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, text).await?;
-
+                
+                    let (thread_id, is_new_thread) = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, text).await?;
+                
                     if let Err(e) = insert_message(pool.clone(), &thread_id, "user", text, "text", &assistant_id).await {
                         log::error!("Failed to log user message: {:?}", e);
                     }
-
-                    let response_result = second_message_and_so_on(&openai_key, &thread_id, text, &assistant_id).await;
-
+                
+                    let response_result = if is_new_thread {
+                        first_loop(&openai_key, &thread_id, &assistant_id).await
+                    } else {
+                        second_message_and_so_on(&openai_key, &thread_id, text, &assistant_id).await
+                    };
+                
                     match response_result {
                         Ok(response_value) => {
                             if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
@@ -141,12 +145,12 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                 // Handle audio messages
                 else if let Some(audio) = message.audio() {
                     log::info!("Received audio message");
-
+                
                     let mut custom_message = convert_teloxide_message_to_custom(message.clone());
                     let chat_id = message.chat.id;
-
-                    let thread_id = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, "Audio message initiated thread").await?;
-
+                
+                    let (thread_id, is_new_thread) = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, "Audio message initiated thread").await?;
+                
                     if let Some(ref mut custom_audio) = &mut custom_message.audio {
                         match get_file_path(&custom_audio.file_id, &bot_token).await {
                             Ok(file_path) => {
@@ -156,15 +160,19 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                         if let Err(e) = insert_message(pool.clone(), &thread_id, "user", &transcription, "audio", &assistant_id).await {
                                             log::error!("Failed to log user message: {:?}", e);
                                         }
-
-                                        let response_result = second_message_and_so_on(&openai_key, &thread_id, &transcription, &assistant_id).await;
-
+                
+                                        let response_result = if is_new_thread {
+                                            first_loop(&openai_key, &thread_id, &assistant_id).await
+                                        } else {
+                                            second_message_and_so_on(&openai_key, &thread_id, &transcription, &assistant_id).await
+                                        };
+                
                                         match response_result {
                                             Ok(response_value) => {
                                                 if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
                                                     log::error!("Failed to log assistant message: {:?}", e);
                                                 }
-
+                
                                                 bot.send_message(chat_id, response_value).await?;
                                             },
                                             Err(e) => {
@@ -190,12 +198,12 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                 // Handle voice messages
                 else if let Some(voice) = message.voice() {
                     log::info!("Received voice message");
-
+                
                     let mut custom_message = convert_teloxide_message_to_custom(message.clone());
                     let chat_id = message.chat.id;
-
-                    let thread_id = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, "Voice message initiated thread").await?;
-
+                
+                    let (thread_id, is_new_thread) = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, "Voice message initiated thread").await?;
+                
                     if let Some(ref mut custom_voice) = &mut custom_message.voice {
                         match get_file_path(&custom_voice.file_id, &bot_token).await {
                             Ok(file_path) => {
@@ -205,15 +213,19 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                         if let Err(e) = insert_message(pool.clone(), &thread_id, "user", &transcription, "voice", &assistant_id).await {
                                             log::error!("Failed to log user message: {:?}", e);
                                         }
-
-                                        let response_result = second_message_and_so_on(&openai_key, &thread_id, &transcription, &assistant_id).await;
-
+                
+                                        let response_result = if is_new_thread {
+                                            first_loop(&openai_key, &thread_id, &assistant_id).await
+                                        } else {
+                                            second_message_and_so_on(&openai_key, &thread_id, &transcription, &assistant_id).await
+                                        };
+                
                                         match response_result {
                                             Ok(response_value) => {
                                                 if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
                                                     log::error!("Failed to log assistant message: {:?}", e);
                                                 }
-
+                
                                                 bot.send_message(chat_id, response_value).await?;
                                             },
                                             Err(e) => {
@@ -263,26 +275,37 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
     }).await;
 }
 
-async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, assistant_id: &str, openai_key: &str, initial_message: &str) -> Result<String, anyhow::Error> {
+async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, assistant_id: &str, openai_key: &str, initial_message: &str) -> Result<(String, bool), anyhow::Error> {
     let existing_thread_id = crate::database::get_thread_by_user_id_and_assistant(pool.clone(), user_id, assistant_id).await?;
-    let thread_id = match existing_thread_id {
-        Some(thread_id) => thread_id,
+    match existing_thread_id {
+        Some(thread_id) => Ok((thread_id, false)),
         None => {
-            match create_openai_thread(openai_key, initial_message).await {
-                Ok(created_thread_id) => {
-                    insert_thread(pool.clone(), &created_thread_id, user_id, &created_thread_id, assistant_id).await?;
-                    first_loop(openai_key, &created_thread_id, assistant_id).await?;
-                    created_thread_id
-                },
-                Err(e) => {
-                    log::error!("Failed to create OpenAI thread: {:?}", e);
-                    return Err(e);
-                }
-            }
-        }
-    };
-    Ok(thread_id)
+            let created_thread_id = create_openai_thread(openai_key, initial_message).await?;
+            insert_thread(pool.clone(), &created_thread_id, user_id, &created_thread_id, assistant_id).await?;
+            Ok((created_thread_id, true))
+        },
+    }
 }
+// async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, assistant_id: &str, openai_key: &str, initial_message: &str) -> Result<String, anyhow::Error> {
+//     let existing_thread_id = crate::database::get_thread_by_user_id_and_assistant(pool.clone(), user_id, assistant_id).await?;
+//     let thread_id = match existing_thread_id {
+//         Some(thread_id) => thread_id,
+//         None => {
+//             match create_openai_thread(openai_key, initial_message).await {
+//                 Ok(created_thread_id) => {
+//                     insert_thread(pool.clone(), &created_thread_id, user_id, &created_thread_id, assistant_id).await?;
+//                     first_loop(openai_key, &created_thread_id, assistant_id).await?;
+//                     created_thread_id
+//                 },
+//                 Err(e) => {
+//                     log::error!("Failed to create OpenAI thread: {:?}", e);
+//                     return Err(e);
+//                 }
+//             }
+//         }
+//     };
+//     Ok(thread_id)
+// }
 
 
 
