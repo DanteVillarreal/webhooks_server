@@ -14,45 +14,45 @@ pub async fn insert_user(pool: deadpool_postgres::Pool, user: crate::DBUser) -> 
     Ok(())
 }
 
-pub async fn insert_thread(pool: deadpool_postgres::Pool, thread_id: &str, user_id: i64, openai_thread_id: &str) -> Result<(), anyhow::Error> {
+pub async fn insert_thread(pool: deadpool_postgres::Pool, thread_id: &str, user_id: i64, openai_thread_id: &str, assistant_id: &str) -> Result<(), anyhow::Error> {
     let client = pool.get().await.map_err(|e| {
         log::error!("Failed to get client from pool: {:?}", e);
         anyhow::Error::new(e)
     })?;
     
     client.execute(
-        "INSERT INTO threads (thread_id, user_id, openai_thread_id) VALUES ($1, $2, $3)
-         ON CONFLICT (thread_id) DO UPDATE SET user_id = EXCLUDED.user_id, openai_thread_id = EXCLUDED.openai_thread_id",
-        &[&thread_id, &user_id, &openai_thread_id]
+        "INSERT INTO threads (thread_id, user_id, openai_thread_id, assistant_id) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (thread_id) DO UPDATE SET user_id = EXCLUDED.user_id, openai_thread_id = EXCLUDED.openai_thread_id, assistant_id = EXCLUDED.assistant_id",
+        &[&thread_id, &user_id, &openai_thread_id, &assistant_id]
     ).await?;
 
     Ok(())
 }
 
-pub async fn insert_message(pool: deadpool_postgres::Pool, thread_id: &str, sender: &str, content: &str, message_type: &str) -> Result<(), anyhow::Error> {
+pub async fn insert_message(pool: deadpool_postgres::Pool, thread_id: &str, sender: &str, content: &str, message_type: &str, assistant_id: &str) -> Result<(), anyhow::Error> {
     let client = pool.get().await.map_err(|e| {
         log::error!("Failed to get client from pool: {:?}", e);
         anyhow::Error::new(e)
     })?;
     
     client.execute(
-        "INSERT INTO messages (thread_id, sender, content, message_type) VALUES ($1, $2, $3, $4)",
-        &[&thread_id, &sender, &content, &message_type]
+        "INSERT INTO messages (thread_id, sender, content, message_type, assistant_id) VALUES ($1, $2, $3, $4, $5)",
+        &[&thread_id, &sender, &content, &message_type, &assistant_id]
     ).await?;
 
     Ok(())
 }
 
-pub async fn get_thread_by_user_id(pool: deadpool_postgres::Pool, user_id: i64) -> Result<Option<String>, anyhow::Error> {
+pub async fn get_thread_by_user_id_and_assistant(pool: deadpool_postgres::Pool, user_id: i64, assistant_id: &str) -> Result<Option<String>, anyhow::Error> {
     // Get a client from the pool, handling the pool error explicitly
     let client = pool.get().await.map_err(|e| {
         log::error!("Failed to get client from pool: {:?}", e);
         anyhow::Error::new(e)
     })?;
 
-    // Fetch the thread_id for the given user_id, if it exists
-    let stmt = "SELECT thread_id FROM threads WHERE user_id = $1";
-    let row = client.query_opt(stmt, &[&user_id]).await?;
+    // Fetch the thread_id for the given user_id and assistant_id, if it exists
+    let stmt = "SELECT thread_id FROM threads WHERE user_id = $1 AND assistant_id = $2";
+    let row = client.query_opt(stmt, &[&user_id, &assistant_id]).await?;
 
     // Extract thread_id from the row, if it exists
     if let Some(row) = row {
@@ -61,3 +61,22 @@ pub async fn get_thread_by_user_id(pool: deadpool_postgres::Pool, user_id: i64) 
         Ok(None)
     }
 }
+
+// pub async fn get_thread_by_user_id(pool: deadpool_postgres::Pool, user_id: i64) -> Result<Option<String>, anyhow::Error> {
+//     // Get a client from the pool, handling the pool error explicitly
+//     let client = pool.get().await.map_err(|e| {
+//         log::error!("Failed to get client from pool: {:?}", e);
+//         anyhow::Error::new(e)
+//     })?;
+
+//     // Fetch the thread_id for the given user_id, if it exists
+//     let stmt = "SELECT thread_id FROM threads WHERE user_id = $1";
+//     let row = client.query_opt(stmt, &[&user_id]).await?;
+
+//     // Extract thread_id from the row, if it exists
+//     if let Some(row) = row {
+//         Ok(Some(row.get("thread_id")))
+//     } else {
+//         Ok(None)
+//     }
+// }
