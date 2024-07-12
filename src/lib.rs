@@ -737,7 +737,13 @@ use teloxide::prelude::Requester;
 
 use teloxide::types::ChatId;
 
-pub async fn summarize_conversation(pool: &deadpool_postgres::Pool, username: &str, assistant_id: &str, openai_key: &str, bot: &Bot, chat_id: i64) -> anyhow::Result<()> {
+pub async fn summarize_conversation(pool: &deadpool_postgres::Pool, message: &str, openai_key: &str, bot: &Bot, chat_id: i64
+) -> anyhow::Result<()> {
+    // Extract the username and assistant_id from the message
+    let parts: Vec<&str> = message.split_whitespace().collect();
+    let username = parts.get(1).unwrap_or(&"unknown");
+    let assistant_id = parts.iter().find(|&&part| part.starts_with("asst_")).unwrap_or(&"unknown");
+
     let client = pool.get().await?;
 
     // Get user_id from username
@@ -762,7 +768,7 @@ pub async fn summarize_conversation(pool: &deadpool_postgres::Pool, username: &s
     }
 
     // Create a new initial message for the assistant to summarize the conversation
-    let summarize_request = format!("Summarize this conversation: \n{}", conversation);
+    let summarize_request = format!("{}", conversation);
 
     // Get or create a thread and log the user's request message
     let (new_thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id, assistant_id, openai_key, &summarize_request).await?;

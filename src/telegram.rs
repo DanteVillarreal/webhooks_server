@@ -120,13 +120,13 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
 
                     let chat_id = message.chat.id;
                     
-                    if text.trim() == "/summarize" {
+                    if text.trim().contains("/summarize") {
                         log::info!("User requested to summarize conversation");
                         
                         // Perform summarization only for this assistant ID
                         let assistant_id = "asst_wjKt6A8SZxyywRtyHGSgbJu1";  // Target assistant ID for summarization
                         
-                        summarize_conversation(&pool, &message.from().unwrap().username.as_deref().unwrap_or("unknown"), assistant_id, &openai_key, &bot, chat_id.0).await?;
+                        summarize_conversation(&pool, text, &openai_key, &bot, chat_id.0).await?;
                         
                     } else {
                         let (thread_id, is_new_thread) = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, text).await?;
