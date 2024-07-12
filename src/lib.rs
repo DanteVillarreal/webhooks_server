@@ -729,3 +729,68 @@ async fn introduce_delay() {
     tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds)).await;
 }
 
+
+
+//function to summarize:
+use teloxide::Bot;
+use teloxide::prelude::Requester;
+
+use teloxide::types::ChatId;
+
+pub async fn summarize_conversation(pool: &deadpool_postgres::Pool, username: &str, assistant_id: &str, openai_key: &str, bot: &Bot, chat_id: i64) -> anyhow::Result<()> {
+    let client = pool.get().await?;
+
+    // Get user_id from username
+    let query = "SELECT user_id FROM users WHERE username = $1";
+    let user_id_row = client.query_one(query, &[&username]).await?;
+    let user_id: i64 = user_id_row.get("user_id");
+
+    // Get the thread_id for the given user_id and assistant_id
+    let query = "SELECT thread_id FROM threads WHERE user_id = $1 AND assistant_id = $2";
+    let thread_id_row = client.query_one(query, &[&user_id, &assistant_id]).await?;
+    let thread_id: String = thread_id_row.get("thread_id");
+
+    // Get messages for the thread_id
+    let query = "SELECT sender, content FROM messages WHERE thread_id = $1 ORDER BY created_at ASC";
+    let rows = client.query(query, &[&thread_id]).await?;
+
+    let mut conversation = String::new();
+    for row in rows {
+        let sender: String = row.get("sender");
+        let content: String = row.get("content");
+        conversation.push_str(&format!("{}: {}\n", sender, content));
+    }
+
+    // Create a new initial message for the assistant to summarize the conversation
+    let summarize_request = format!("Summarize this conversation: \n{}", conversation);
+
+    // Get or create a thread and log the user's request message
+    let (new_thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id, assistant_id, openai_key, &summarize_request).await?;
+
+    if let Err(e) = crate::database::insert_message(pool.clone(), &new_thread_id, "user", &summarize_request, "text", assistant_id).await {
+        log::error!("Failed to log user message: {:?}", e);
+    }
+
+    // Call first_loop to process the summarization request
+    let response_result = if is_new_thread {
+        first_loop(openai_key, &new_thread_id, assistant_id).await
+    } else {
+        second_message_and_so_on(openai_key, &new_thread_id, &summarize_request, assistant_id).await
+    };
+
+    match response_result {
+        Ok(response_value) => {
+            //introduce_delay().await;
+            if let Err(e) = crate::database::insert_message(pool.clone(), &new_thread_id, "assistant", &response_value, "text", assistant_id).await {
+                log::error!("Failed to log assistant message: {:?}", e);
+            }
+            bot.send_message(ChatId(chat_id), response_value).await?;
+        },
+        Err(e) => {
+            log::error!("Failed to process summarization request: {:?}", e);
+            bot.send_message(ChatId(chat_id), "Failed to summarize conversation. Please try again later.").await?;
+        }
+    }
+
+    Ok(())
+}

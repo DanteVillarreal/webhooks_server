@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message, handle_voice_message, introduce_delay};
+use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message, handle_voice_message, introduce_delay, summarize_conversation};
 use crate::{User, Chat, Audio, Voice};
 use anyhow::anyhow;
 use crate::Message as CustomMessage; // Alias your Message type to avoid name conflicts
@@ -113,32 +113,46 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                 }
 
                 // Handle user message text
+// Part of the `run_telegram_bot` function that handles text messages up to the point of handling `/summarize` command.
+
                 if let Some(text) = message.text() {
                     log::info!("Received message: {}", text);
-                
-                    let (thread_id, is_new_thread) = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, text).await?;
-                
-                    if let Err(e) = insert_message(pool.clone(), &thread_id, "user", text, "text", &assistant_id).await {
-                        log::error!("Failed to log user message: {:?}", e);
-                    }
-                
-                    let response_result = if is_new_thread {
-                        first_loop(&openai_key, &thread_id, &assistant_id).await
+
+                    let chat_id = message.chat.id;
+                    
+                    if text.trim() == "/summarize" {
+                        log::info!("User requested to summarize conversation");
+                        
+                        // Perform summarization only for this assistant ID
+                        let assistant_id = "asst_wjKt6A8SZxyywRtyHGSgbJu1";  // Target assistant ID for summarization
+                        
+                        summarize_conversation(&pool, &message.from().unwrap().username.as_deref().unwrap_or("unknown"), assistant_id, &openai_key, &bot, chat_id.0).await?;
+                        
                     } else {
-                        second_message_and_so_on(&openai_key, &thread_id, text, &assistant_id).await
-                    };
-                
-                    match response_result {
-                        Ok(response_value) => {
-                            introduce_delay().await;
-                            if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
-                                log::error!("Failed to log assistant message: {:?}", e);
+                        let (thread_id, is_new_thread) = get_or_create_thread(&pool, user_id, &assistant_id, &openai_key, text).await?;
+                        
+                        if let Err(e) = insert_message(pool.clone(), &thread_id, "user", text, "text", &assistant_id).await {
+                            log::error!("Failed to log user message: {:?}", e);
+                        }
+                        
+                        let response_result = if is_new_thread {
+                            first_loop(&openai_key, &thread_id, &assistant_id).await
+                        } else {
+                            second_message_and_so_on(&openai_key, &thread_id, text, &assistant_id).await
+                        };
+                        
+                        match response_result {
+                            Ok(response_value) => {
+                                introduce_delay().await;
+                                if let Err(e) = insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
+                                    log::error!("Failed to log assistant message: {:?}", e);
+                                }
+                                bot.send_message(chat_id, response_value).await?;
+                            },
+                            Err(e) => {
+                                log::error!("Failed to process message: {:?}", e);
+                                bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
                             }
-                            bot.send_message(message.chat.id, response_value).await?;
-                        },
-                        Err(e) => {
-                            log::error!("Failed to process message: {:?}", e);
-                            bot.send_message(message.chat.id, "Failed to process message. Please try again later.").await?;
                         }
                     }
                 }
@@ -278,7 +292,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
     }).await;
 }
 
-async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, assistant_id: &str, openai_key: &str, initial_message: &str) -> Result<(String, bool), anyhow::Error> {
+pub async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, assistant_id: &str, openai_key: &str, initial_message: &str) -> Result<(String, bool), anyhow::Error> {
     let existing_thread_id = crate::database::get_thread_by_user_id_and_assistant(pool.clone(), user_id, assistant_id).await?;
     match existing_thread_id {
         Some(thread_id) => Ok((thread_id, false)),
