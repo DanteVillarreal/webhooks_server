@@ -87,7 +87,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
     log::info!("Bot started");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
     let assistant_id = "asst_ybfxpPMxcuj7GZkwELR6sttt".to_string();
-    let wait_duration = tokio::time::Duration::from_secs(2); // You can set the desired wait duration
+    let wait_duration = tokio::time::Duration::from_secs(10); // You can set the desired wait duration
     let response_cue = tokio::time::Duration::from_secs(2); // Set the desired response delay
 
     teloxide::repl(bot.clone(), move |message: teloxide::prelude::Message, bot: Bot| {
