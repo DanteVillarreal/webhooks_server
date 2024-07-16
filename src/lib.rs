@@ -969,25 +969,20 @@ pub async fn users_second_message_window(
 ) -> Result<(), anyhow::Error> {
 
     log::info!("waiting for 2nd message window to end");
-    tokio::time::sleep(wait_duration).await;
-    let mut subsequent_message_found = false;
+
+    // Concurrently listen for new messages during the wait_duration
+    let end_time = tokio::time::Instant::now() + wait_duration;
     let mut last_received_message = message;
-    
-    let mut attempts = 0;
+    let mut subsequent_message_found = false;
 
-    loop {
-        // First, introduce the response cue delay
-
-        //TODO: INSERT ANALYZING AI
-        log::info!("waiting for response_cue to end");
-        tokio::time::sleep(response_cue).await;
-        // Check for new messages during the wait time
+    while tokio::time::Instant::now() < end_time {
         let new_messages = bot.get_updates().await?;
         for update in new_messages {
             if let teloxide::types::UpdateKind::Message(new_message) = update.kind {
                 if new_message.from().map(|u| u.id.0 as i64) == Some(user_id) {
                     // Update the last received message and handle the new message
                     last_received_message = new_message.clone();
+                    subsequent_message_found = true;
 
                     if let Some(text) = new_message.text() {
                         process_text_message(&bot, &pool, &new_message, user_id, text, openai_key, assistant_id).await?;
@@ -999,19 +994,11 @@ pub async fn users_second_message_window(
                 }
             }
         }
-
-        // If no new messages were found, break the loop
-        if !subsequent_message_found {
-            break;
-        }
-
-        // Reset the flag for the next check
-        subsequent_message_found = false;
-        attempts+=1;
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 
-    // Finally, process and send the AI's response if no new messages are found
     if !subsequent_message_found {
+        // Process and send the AI's response if no new messages are found
         let text = last_received_message.text().unwrap_or("");
         let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id, assistant_id, openai_key, text).await?;
 
