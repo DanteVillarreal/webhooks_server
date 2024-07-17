@@ -956,71 +956,79 @@ async fn process_voice_message(
     Ok(())
 }
 
-pub async fn users_second_message_window(
-    bot: Bot,
-    pool: deadpool_postgres::Pool,
-    message: teloxide::prelude::Message,
-    user_id: i64,
-    wait_duration: tokio::time::Duration,
-    response_cue: tokio::time::Duration,
-    bot_token: &str,
-    openai_key: &str,
-    assistant_id: &str,
-) -> Result<(), anyhow::Error> {
+// pub async fn users_second_message_window(
+//     bot: Bot,
+//     pool: deadpool_postgres::Pool,
+//     message: crate::Message,
+//     user_id: i64,
+//     wait_duration: tokio::time::Duration,
+//     response_cue: tokio::time::Duration,
+//     bot_token: &str,
+//     openai_key: &str,
+//     assistant_id: &str,
+// ) -> Result<(), anyhow::Error> {
+//     log::info!("waiting for 2nd message window to end");
 
-    log::info!("waiting for 2nd message window to end");
+//     // Initialization for tracking new messages
+//     let mut new_messages: Vec<crate::Message> = vec![message.clone()];
+//     let mut last_received_message = message.clone();
+//     let end_time = tokio::time::Instant::now() + wait_duration;
 
-    // Concurrently listen for new messages during the wait_duration
-    let end_time = tokio::time::Instant::now() + wait_duration;
-    let mut last_received_message = message;
-    let mut subsequent_message_found = false;
+//     // Message processing loop
+//     while tokio::time::Instant::now() < end_time {
+//         // Sleep for a short duration to avoid busy waiting
+//         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    while tokio::time::Instant::now() < end_time {
-        let new_messages = bot.get_updates().await?;
-        for update in new_messages {
-            if let teloxide::types::UpdateKind::Message(new_message) = update.kind {
-                if new_message.from().map(|u| u.id.0 as i64) == Some(user_id) {
-                    // Update the last received message and handle the new message
-                    last_received_message = new_message.clone();
-                    subsequent_message_found = true;
+//         // Check if we have received new messages via webhooks
+//         if let Some(new_message) = crate::telegram::NEW_MESSAGES.lock().await.pop() {
+//             if new_message.from().as_ref().map(|u| u.id.0 as i64) == Some(user_id) {
+//                 // Convert teloxide::Message to custom Message type
+//                 let custom_message = crate::telegram::convert_teloxide_message_to_custom(new_message.clone());
+//                 // Update the last received message and add to new_messages
+//                 last_received_message = custom_message.clone();
+//                 new_messages.push(custom_message);
+                
+//                 if let Some(ref text) = new_message.text {
+//                     process_text_message(&bot, &pool, &custom_message, user_id, text, openai_key, assistant_id).await?;
+//                 } else if let Some(ref audio) = new_message.audio {
+//                     process_audio_message(&bot, &pool, &custom_message, user_id, audio.clone(), openai_key, bot_token, assistant_id).await?;
+//                 } else if let Some(ref voice) = new_message.voice {
+//                     process_voice_message(&bot, &pool, &custom_message, user_id, voice.clone(), openai_key, bot_token, assistant_id).await?;
+//                 }
+//          }
+//         }
+        
+//     }
 
-                    if let Some(text) = new_message.text() {
-                        process_text_message(&bot, &pool, &new_message, user_id, text, openai_key, assistant_id).await?;
-                    } else if let Some(audio) = new_message.audio() {
-                        process_audio_message(&bot, &pool, &new_message, user_id, audio.clone(), openai_key, bot_token, assistant_id).await?;
-                    } else if let Some(voice) = new_message.voice() {
-                        process_voice_message(&bot, &pool, &new_message, user_id, voice.clone(), openai_key, bot_token, assistant_id).await?;
-                    }
-                }
-            }
-        }
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    }
+//     // Check if last received message contains text
+//     let text = match last_received_message.text {
+//         Some(ref t) => t,
+//         None => {
+//             log::warn!("No text message to process.");
+//             return Ok(());
+//         },
+//     };
 
-    if !subsequent_message_found {
-        // Process and send the AI's response if no new messages are found
-        let text = last_received_message.text().unwrap_or("");
-        let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id, assistant_id, openai_key, text).await?;
+//     let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id, assistant_id, openai_key, text).await?;
 
-        let response_result = if is_new_thread {
-            first_loop(openai_key, &thread_id, assistant_id).await
-        } else {
-            second_message_and_so_on(openai_key, &thread_id, text, assistant_id).await
-        };
+//     let response_result = if is_new_thread {
+//         first_loop(openai_key, &thread_id, assistant_id).await
+//     } else {
+//         second_message_and_so_on(openai_key, &thread_id, text, assistant_id).await
+//     };
 
-        match response_result {
-            Ok(response_value) => {
-                bot.send_message(last_received_message.chat.id, response_value).await?;
-            },
-            Err(e) => {
-                log::error!("Failed to process message: {:?}", e);
-                bot.send_message(last_received_message.chat.id, "Failed to process message. Please try again later.").await?;
-            }
-        }
-    }
+//     match response_result {
+//         Ok(response_value) => {
+//             bot.send_message(ChatId(user_id), response_value).await?;
+//         },
+//         Err(e) => {
+//             log::error!("Failed to process message: {:?}", e);
+//             bot.send_message(ChatId(user_id), "Failed to process message. Please try again later.").await?;
+//         }
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 
 // pub async fn users_second_message_window(

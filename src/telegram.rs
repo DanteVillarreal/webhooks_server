@@ -11,13 +11,30 @@ use anyhow::anyhow;
 use crate::Message as CustomMessage; // Alias your Message type to avoid name conflicts
 use crate::database::{insert_thread, insert_message};
 //use teloxide::types::{ChatKind};
-
+use tokio::time::{sleep, Duration};
+use tokio::sync::RwLock;
 
 
 // Global HashMap to store user_id to thread_id mappings
 lazy_static::lazy_static! {
     static ref USER_THREADS: Arc<Mutex<HashMap<u64, String>>> = Arc::new(Mutex::new(HashMap::new()));
 }
+
+// Define UserState to store message buffer and timer
+#[derive(Default)]
+struct UserState {
+    messages: Vec<crate::Message>,
+    timer: Option<tokio::task::JoinHandle<()>>,
+}
+// Shared state to hold user states
+type SharedState = Arc<RwLock<HashMap<u64, UserState>>>;
+
+lazy_static::lazy_static! {
+    static ref USER_STATES: SharedState = Arc::new(RwLock::new(HashMap::new()));
+}
+
+
+
 
 
 pub async fn get_file_path(file_id: &str, bot_token: &str) -> Result<String, anyhow::Error> {
@@ -83,88 +100,130 @@ pub fn convert_teloxide_message_to_custom(message: teloxide::prelude::Message) -
 
 
 pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
-    let bot = Bot::from_env();
+    let bot = teloxide::Bot::from_env();
     log::info!("Bot started");
-    let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
+    let openai_key = std::env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
     let assistant_id = "asst_ybfxpPMxcuj7GZkwELR6sttt".to_string();
-    let wait_duration = tokio::time::Duration::from_secs(10); // You can set the desired wait duration
-    let response_cue = tokio::time::Duration::from_secs(2); // Set the desired response delay
 
-    teloxide::repl(bot.clone(), move |message: teloxide::prelude::Message, bot: Bot| {
+    teloxide::repl(bot.clone(), move |message: teloxide::prelude::Message, bot: teloxide::Bot| {
         let openai_key = openai_key.clone();
         let assistant_id = assistant_id.clone();
-        let bot_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
+        let bot_token = std::env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
 
         let pool = pool.clone();
-        let wait_duration = wait_duration.clone();
-        let response_cue = response_cue.clone();
 
         async move {
             let result: anyhow::Result<()> = async {
                 let user_id = message.from()
-                    .ok_or_else(|| anyhow!("User not found in message"))
+                    .ok_or_else(|| anyhow::anyhow!("User not found in message"))
                     .map(|user| user.id.0 as i64)?;
-                
+
                 let db_user = crate::DBUser {
                     id: user_id,
                     first_name: Some(message.from().unwrap().first_name.clone()), // value from Telegram API, always Some
                     last_name: Some(message.from().unwrap().last_name.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
                     username: Some(message.from().unwrap().username.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
                 };
-                
+
                 if let Err(e) = crate::database::insert_user(pool.clone(), db_user).await {
                     log::error!("Failed to insert or update user: {:?}", e);
                 }
 
-                // Handle user message text
                 if let Some(text) = message.text() {
-                    crate::users_second_message_window(
-                        bot.clone(),
-                        pool.clone(),
-                        message.clone(),
-                        user_id,
-                        wait_duration,
-                        response_cue,
-                        &bot_token,
-                        &openai_key,
-                        &assistant_id,
-                    ).await?;
+                    log::info!("Received message: {}", text);
+                    let chat_id = message.chat.id;
+
+                    let mut user_states = USER_STATES.write().await;
+                    let user_state = user_states.entry(user_id as u64).or_default();
+
+                    // Add message to buffer
+                    user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
+
+                    // If there's an existing timer, cancel it
+                    if let Some(timer) = user_state.timer.take() {
+                        timer.abort();
+                        log::info!("Existing timer reset for user_id: {}", user_id);
+                    }
+
+                    // Start a new timer
+                    let bot_clone = bot.clone();
+                    let openai_key_clone = openai_key.clone();
+                    let assistant_id_clone = assistant_id.clone();
+                    let pool_clone = pool.clone();
+
+                    log::info!("Starting 15-second timer for user_id: {}", user_id);
+                    user_state.timer = Some(tokio::spawn(async move {
+                        log::info!("Waiting for any new messages for user_id: {}", user_id);
+                        sleep(Duration::from_secs(15)).await;
+
+                        // Handle the collected messages after the timeout
+                        handle_buffered_messages(user_id as u64, pool_clone, bot_clone, chat_id, openai_key_clone, assistant_id_clone).await;
+                    }));
                 }
 
                 // Handle audio messages
                 else if let Some(audio) = message.audio() {
-                    crate::users_second_message_window(
-                        bot.clone(),
-                        pool.clone(),
-                        message.clone(),
-                        user_id,
-                        wait_duration,
-                        response_cue,
-                        &bot_token,
-                        &openai_key,
-                        &assistant_id,
-                    ).await?;
+                    log::info!("Received audio message");
+                
+                    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
+                    let chat_id = message.chat.id;
+
+                    // Buffer the audio message
+                    let mut user_states = USER_STATES.write().await;
+                    let user_state = user_states.entry(user_id as u64).or_default();
+                    user_state.messages.push(custom_message);
+                    
+                    // Reset the timer if it's active
+                    if let Some(timer) = user_state.timer.take() {
+                        timer.abort();
+                    }
+
+                    let bot_clone = bot.clone();
+                    let openai_key_clone = openai_key.clone();
+                    let assistant_id_clone = assistant_id.clone();
+                    let pool_clone = pool.clone();
+
+                    user_state.timer = Some(tokio::spawn(async move {
+                        sleep(Duration::from_secs(15)).await;
+
+                        // Handle the collected messages after the timeout
+                        handle_buffered_messages(user_id as u64, pool_clone, bot_clone, chat_id, openai_key_clone, assistant_id_clone).await;
+                    }));
                 }
 
                 // Handle voice messages
                 else if let Some(voice) = message.voice() {
-                    crate::users_second_message_window(
-                        bot.clone(),
-                        pool.clone(),
-                        message.clone(),
-                        user_id,
-                        wait_duration,
-                        response_cue,
-                        &bot_token,
-                        &openai_key,
-                        &assistant_id,
-                    ).await?;
+                    log::info!("Received voice message");
+                
+                    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
+                    let chat_id = message.chat.id;
+
+                    // Buffer the voice message
+                    let mut user_states = USER_STATES.write().await;
+                    let user_state = user_states.entry(user_id as u64).or_default();
+                    user_state.messages.push(custom_message);
+                    
+                    // Reset the timer if it's active
+                    if let Some(timer) = user_state.timer.take() {
+                        timer.abort();
+                    }
+
+                    let bot_clone = bot.clone();
+                    let openai_key_clone = openai_key.clone();
+                    let assistant_id_clone = assistant_id.clone();
+                    let pool_clone = pool.clone();
+
+                    user_state.timer = Some(tokio::spawn(async move {
+                        sleep(Duration::from_secs(15)).await;
+
+                        // Handle the collected messages after the timeout
+                        handle_buffered_messages(user_id as u64, pool_clone, bot_clone, chat_id, openai_key_clone, assistant_id_clone).await;
+                    }));
                 }
 
                 Ok(())
             }.await;
 
-            // Handle any errors that were thrown during processing
             if let Err(error) = result {
                 match &error.downcast_ref::<teloxide::RequestError>() {
                     Some(teloxide::RequestError::RetryAfter(duration)) => {
@@ -183,10 +242,11 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                 }
             }
 
-            respond(())
+            teloxide::prelude::respond(())
         }
     }).await;
 }
+
 
 
 // pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
@@ -408,6 +468,62 @@ pub async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, 
             insert_thread(pool.clone(), &created_thread_id, user_id, &created_thread_id, assistant_id).await?;
             Ok((created_thread_id, true))
         },
+    }
+}
+
+async fn handle_buffered_messages(
+    user_id: u64,
+    pool: deadpool_postgres::Pool,
+    bot: teloxide::Bot,
+    chat_id: teloxide::types::ChatId,
+    openai_key: String,
+    assistant_id: String,
+) {
+    let mut user_states = USER_STATES.write().await;
+    if let Some(user_state) = user_states.get_mut(&user_id) {
+        // Concatenate all messages into a single string
+        let concatenated_messages: String = user_state
+            .messages
+            .iter()
+            .map(|message| message.text.clone().unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Clear the user's message buffer
+        user_state.messages.clear();
+
+        let thread_id = match crate::telegram::get_or_create_thread(&pool, user_id as i64, &assistant_id, &openai_key, &concatenated_messages).await {
+            Ok((thread_id, _)) => thread_id,
+            Err(e) => {
+                log::error!("Failed to get or create thread: {:?}", e);
+                bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                return;
+            }
+        };
+
+        if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "user", &concatenated_messages, "text", &assistant_id).await {
+            log::error!("Failed to log user messages: {:?}", e);
+        }
+
+        // Process the concatenated messages
+        let response_result = match crate::telegram::second_message_and_so_on(&openai_key, &thread_id, &concatenated_messages, &assistant_id).await {
+            Ok(response_value) => {
+                if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
+                    log::error!("Failed to log assistant message: {:?}", e);
+                }
+                bot.send_message(chat_id, response_value).await.ok();
+                Ok(())
+            },
+            Err(e) => {
+                log::error!("Failed to process messages: {:?}", e);
+                bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                Err(e)
+            }
+        };
+
+        if let Err(e) = response_result {
+            log::error!("Failed to send response: {:?}", e);
+        }
     }
 }
 // async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, assistant_id: &str, openai_key: &str, initial_message: &str) -> Result<String, anyhow::Error> {
