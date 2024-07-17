@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::env;
-use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message, handle_voice_message, introduce_delay, summarize_conversation};
+use crate::{ create_openai_thread, first_loop, second_message_and_so_on, handle_message_handler, handle_audio_message, handle_voice_message};
 use crate::{User, Chat, Audio, Voice};
 use anyhow::anyhow;
 use crate::Message as CustomMessage; // Alias your Message type to avoid name conflicts
@@ -481,6 +481,8 @@ async fn handle_buffered_messages(
 ) {
     let mut user_states = USER_STATES.write().await;
     if let Some(user_state) = user_states.get_mut(&user_id) {
+        log::info!("Processing buffered messages for user_id: {}", user_id);
+        
         // Concatenate all messages into a single string
         let concatenated_messages: String = user_state
             .messages
@@ -491,6 +493,22 @@ async fn handle_buffered_messages(
 
         // Clear the user's message buffer
         user_state.messages.clear();
+        log::info!("User message buffer cleared for user_id: {}", user_id);
+
+        // Pre-process the concatenated messages
+        let (variable1, variable2, variable3) = match crate::pre_process_message(&openai_key, &concatenated_messages).await {
+            Ok(vars) => vars,
+            Err(e) => {
+                log::error!("Failed to pre-process messages: {:?}", e);
+                bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                return;
+            }
+        };
+
+        // Insert the pre-processing results into the database
+        if let Err(e) = crate::database::insert_pre_processing_results(&pool, user_id, &variable1, &variable2, &variable3).await {
+            log::error!("Failed to log pre-processing results: {:?}", e);
+        }
 
         let thread_id = match crate::telegram::get_or_create_thread(&pool, user_id as i64, &assistant_id, &openai_key, &concatenated_messages).await {
             Ok((thread_id, _)) => thread_id,
@@ -505,8 +523,12 @@ async fn handle_buffered_messages(
             log::error!("Failed to log user messages: {:?}", e);
         }
 
-        // Process the concatenated messages
-        let response_result = match crate::telegram::second_message_and_so_on(&openai_key, &thread_id, &concatenated_messages, &assistant_id).await {
+        // Include the pre-processed variables in the final processing
+        let final_message = format!("Pre-processing results:\n{}\n{}\n{}\nUser messages:\n{}",
+                                    variable1, variable2, variable3, concatenated_messages);
+
+        // Process the concatenated messages with the pre-processing results
+        let response_result = match crate::telegram::second_message_and_so_on(&openai_key, &thread_id, &final_message, &assistant_id).await {
             Ok(response_value) => {
                 if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
                     log::error!("Failed to log assistant message: {:?}", e);

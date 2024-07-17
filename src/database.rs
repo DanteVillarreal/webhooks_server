@@ -62,6 +62,30 @@ pub async fn get_thread_by_user_id_and_assistant(pool: deadpool_postgres::Pool, 
     }
 }
 
+pub async fn insert_pre_processing_results(
+    pool: &deadpool_postgres::Pool,
+    user_id: u64,
+    variable1: &str,
+    variable2: &str,
+    variable3: &str,
+) -> Result<(), anyhow::Error> {
+    let client = pool.get().await.map_err(|e| {
+        log::error!("Failed to get client from pool: {:?}", e);
+        anyhow::Error::new(e)
+    })?;
+
+    let user_id = user_id as i64 ;
+    // Add your custom logic to insert the variables into your new tables
+    client.execute(
+        "INSERT INTO pre_processing_results (user_id, variable1, variable2, variable3) VALUES ($1, $2, $3, $4)",
+        &[&user_id, &variable1, &variable2, &variable3]
+    ).await?;
+    
+    Ok(())
+}
+
+
+
 // pub async fn get_thread_by_user_id(pool: deadpool_postgres::Pool, user_id: i64) -> Result<Option<String>, anyhow::Error> {
 //     // Get a client from the pool, handling the pool error explicitly
 //     let client = pool.get().await.map_err(|e| {

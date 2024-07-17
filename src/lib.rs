@@ -717,244 +717,286 @@ pub async fn send_next_message(thread_id: &str, text: &str) -> anyhow::Result<()
     Ok(())
 }
 
-// Function to introduce a random delay between 10 and 20 seconds
-async fn introduce_delay() {
-    // Create an instance of StdRng from entropy using the fully qualified path
-    let mut rng = rand::rngs::StdRng::from_entropy();
-    
-    // Use the fully qualified path for the gen_range method to specify that it belongs to the Rng trait
-    let delay_seconds: u64 = rand::Rng::gen_range(&mut rng, 10..=20);
-    
-    // Use the fully qualified path for sleep and Duration functions
-    tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds)).await;
-}
+pub async fn pre_process_message(openai_key: &str, message: &str) -> Result<(String, String, String), anyhow::Error> {
+    let client = reqwest::Client::new();
 
-
-
-//function to summarize:
-use teloxide::Bot;
-use teloxide::prelude::Requester;
-
-use teloxide::types::ChatId;
-
-pub async fn summarize_conversation(
-    pool: &deadpool_postgres::Pool, 
-    message: &str, 
-    openai_key: &str, 
-    bot: &Bot, 
-    chat_id: i64
-) -> anyhow::Result<()> {
-    // Extract the username and assistant_id from the message
-    let parts: Vec<&str> = message.split_whitespace().collect();
-    let username = parts.get(1).unwrap_or(&"unknown");
-    let target_assistant_id = parts.iter().find(|&&part| part.starts_with("asst_")).unwrap_or(&"unknown");
-
-    let client = pool.get().await?;
-
-    // Get user_id from username
-    let query = "SELECT user_id FROM users WHERE username = $1";
-    let user_id_row = client.query_one(query, &[&username]).await?;
-    let user_id: i64 = user_id_row.get("user_id");
-
-    // Get the thread_id for the given user_id and target_assistant_id
-    let query = "SELECT thread_id FROM threads WHERE user_id = $1 AND assistant_id = $2";
-    let thread_id_row = client.query_one(query, &[&user_id, &target_assistant_id]).await?;
-    let thread_id: String = thread_id_row.get("thread_id");
-
-    // Get messages for the thread_id
-    let query = "SELECT sender, content FROM messages WHERE thread_id = $1 ORDER BY created_at ASC";
-    let rows = client.query(query, &[&thread_id]).await?;
-
-    let mut conversation = String::new();
-    for row in rows {
-        let sender: String = row.get("sender");
-        let content: String = row.get("content");
-        conversation.push_str(&format!("{}: {}\n", sender, content));
-    }
-
-    // Create a new initial message for the assistant to summarize the conversation
-    let summarize_request = format!("{}", conversation);
-
-    // Use the designated assistant to handle the summarization (asst_wjKt6A8SZxyywRtyHGSgbJu1)
-    let summarizing_assistant_id = "asst_wjKt6A8SZxyywRtyHGSgbJu1";
-
-    // Get or create a thread and log the user's request message
-    let (new_thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id, summarizing_assistant_id, openai_key, &summarize_request).await?;
-
-    if let Err(e) = crate::database::insert_message(pool.clone(), &new_thread_id, "user", &summarize_request, "text", summarizing_assistant_id).await {
-        log::error!("Failed to log user message: {:?}", e);
-    }
-
-    // Call first_loop to process the summarization request
-    let response_result = if is_new_thread {
-        first_loop(openai_key, &new_thread_id, summarizing_assistant_id).await
-    } else {
-        second_message_and_so_on(openai_key, &new_thread_id, &summarize_request, summarizing_assistant_id).await
-    };
-
-    match response_result {
-        Ok(response_value) => {
-            if let Err(e) = crate::database::insert_message(pool.clone(), &new_thread_id, "assistant", &response_value, "text", summarizing_assistant_id).await {
-                log::error!("Failed to log assistant message: {:?}", e);
-            }
-            bot.send_message(ChatId(chat_id), response_value).await?;
-        },
-        Err(e) => {
-            log::error!("Failed to process summarization request: {:?}", e);
-            bot.send_message(ChatId(chat_id), "Failed to summarize conversation. Please try again later.").await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn process_text_message(
-    bot: &Bot,
-    pool: &deadpool_postgres::Pool,
-    message: &teloxide::prelude::Message,
-    user_id: i64,
-    text: &str,
-    openai_key: &str,
-    assistant_id: &str
-) -> Result<(), anyhow::Error> {
-    let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(pool, user_id, assistant_id, openai_key, text).await?;
-    
-    if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "user", text, "text", assistant_id).await {
-        log::error!("Failed to log user message: {:?}", e);
-    }
-
-    let response_result = if is_new_thread {
-        first_loop(openai_key, &thread_id, assistant_id).await
-    } else {
-        second_message_and_so_on(openai_key, &thread_id, text, assistant_id).await
-    };
-
-    match response_result {
-        Ok(response_value) => {
-            bot.send_message(message.chat.id, response_value).await?;
-        },
-        Err(e) => {
-            log::error!("Failed to process message: {:?}", e);
-            bot.send_message(message.chat.id, "Failed to process message. Please try again later.").await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn process_audio_message(
-    bot: &Bot,
-    pool: &deadpool_postgres::Pool,
-    message: &teloxide::prelude::Message,
-    user_id: i64,
-    audio: teloxide::types::Audio,
-    openai_key: &str,
-    bot_token: &str,
-    assistant_id: &str
-) -> Result<(), anyhow::Error> {
-    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
-    let chat_id = message.chat.id;
-
-    let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(pool, user_id, assistant_id, openai_key, "Audio message initiated thread").await?;
-
-    if let Some(ref mut custom_audio) = &mut custom_message.audio {
-        match crate::telegram::get_file_path(&custom_audio.file_id, bot_token).await {
-            Ok(file_path) => {
-                custom_audio.file_path = Some(file_path);
-                match handle_audio_message(bot_token, &custom_audio, openai_key).await {
-                    Ok(transcription) => {
-                        if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "user", &transcription, "audio", assistant_id).await {
-                            log::error!("Failed to log user message: {:?}", e);
-                        }
-
-                        let response_result = if is_new_thread {
-                            first_loop(openai_key, &thread_id, assistant_id).await
-                        } else {
-                            second_message_and_so_on(openai_key, &thread_id, &transcription, assistant_id).await
-                        };
-
-                        match response_result {
-                            Ok(response_value) => {
-                                bot.send_message(chat_id, response_value).await?;
-                            },
-                            Err(e) => {
-                                log::error!("Failed to process message: {:?}", e);
-                                bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        log::error!("Failed to handle audio message: {:?}", e);
-                        bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
-                    }
+    let response = client.post("https://api.openai.com/v1/chat/completions")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", openai_key))
+        .json(&serde_json::json!({
+            "model": "pre-processing-assistant-model",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a helper pre-processing assistant."
+                },
+                {
+                    "role": "user",
+                    "content": message
                 }
-            },
-            Err(e) => {
-                log::error!("Failed to retrieve file path: {:?}", e);
-                bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
-            }
-        }
-    }
+            ]
+        }))
+        .send()
+        .await?;
 
-    Ok(())
+    let response_json = response.json::<serde_json::Value>().await?;
+    let parsed_response = response_json["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
+
+    // Assuming the pre-processing assistant response is parsed into three parts
+    let variable1 = "parsed_part_1".to_string();
+    let variable2 = "parsed_part_2".to_string();
+    let variable3 = "parsed_part_3".to_string();
+
+    // For simplicity, we're returning placeholder parsed parts.
+    // You need to parse `parsed_response` to extract variable1, variable2, and variable3.
+    Ok((variable1, variable2, variable3))
 }
 
-async fn process_voice_message(
-    bot: &Bot,
-    pool: &deadpool_postgres::Pool,
-    message: &teloxide::prelude::Message,
-    user_id: i64,
-    voice: teloxide::types::Voice,
-    openai_key: &str,
-    bot_token: &str,
-    assistant_id: &str
-) -> Result<(), anyhow::Error> {
-    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
-    let chat_id = message.chat.id;
 
-    let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(pool, user_id, assistant_id, openai_key, "Voice message initiated thread").await?;
 
-    if let Some(ref mut custom_voice) = &mut custom_message.voice {
-        match crate::telegram::get_file_path(&custom_voice.file_id, bot_token).await {
-            Ok(file_path) => {
-                custom_voice.file_path = Some(file_path);
-                match handle_voice_message(bot_token, &custom_voice, openai_key).await {
-                    Ok(transcription) => {
-                        if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "user", &transcription, "voice", assistant_id).await {
-                            log::error!("Failed to log user message: {:?}", e);
-                        }
 
-                        let response_result = if is_new_thread {
-                            first_loop(openai_key, &thread_id, assistant_id).await
-                        } else {
-                            second_message_and_so_on(openai_key, &thread_id, &transcription, assistant_id).await
-                        };
 
-                        match response_result {
-                            Ok(response_value) => {
-                                bot.send_message(chat_id, response_value).await?;
-                            },
-                            Err(e) => {
-                                log::error!("Failed to process message: {:?}", e);
-                                bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        log::error!("Failed to handle voice message: {:?}", e);
-                        bot.send_message(chat_id, "Failed to process your voice message. Please try again later.").await?;
-                    }
-                }
-            },
-            Err(e) => {
-                log::error!("Failed to retrieve file path: {:?}", e);
-                bot.send_message(chat_id, "Failed to process your voice message. Please try again later.").await?;
-            }
-        }
-    }
 
-    Ok(())
-}
+
+
+// // Function to introduce a random delay between 10 and 20 seconds
+// async fn introduce_delay() {
+//     // Create an instance of StdRng from entropy using the fully qualified path
+//     let mut rng = rand::rngs::StdRng::from_entropy();
+    
+//     // Use the fully qualified path for the gen_range method to specify that it belongs to the Rng trait
+//     let delay_seconds: u64 = rand::Rng::gen_range(&mut rng, 10..=20);
+    
+//     // Use the fully qualified path for sleep and Duration functions
+//     tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds)).await;
+// }
+
+
+
+// //function to summarize:
+// use teloxide::Bot;
+// use teloxide::prelude::Requester;
+
+// use teloxide::types::ChatId;
+
+// pub async fn summarize_conversation(
+//     pool: &deadpool_postgres::Pool, 
+//     message: &str, 
+//     openai_key: &str, 
+//     bot: &Bot, 
+//     chat_id: i64
+// ) -> anyhow::Result<()> {
+//     // Extract the username and assistant_id from the message
+//     let parts: Vec<&str> = message.split_whitespace().collect();
+//     let username = parts.get(1).unwrap_or(&"unknown");
+//     let target_assistant_id = parts.iter().find(|&&part| part.starts_with("asst_")).unwrap_or(&"unknown");
+
+//     let client = pool.get().await?;
+
+//     // Get user_id from username
+//     let query = "SELECT user_id FROM users WHERE username = $1";
+//     let user_id_row = client.query_one(query, &[&username]).await?;
+//     let user_id: i64 = user_id_row.get("user_id");
+
+//     // Get the thread_id for the given user_id and target_assistant_id
+//     let query = "SELECT thread_id FROM threads WHERE user_id = $1 AND assistant_id = $2";
+//     let thread_id_row = client.query_one(query, &[&user_id, &target_assistant_id]).await?;
+//     let thread_id: String = thread_id_row.get("thread_id");
+
+//     // Get messages for the thread_id
+//     let query = "SELECT sender, content FROM messages WHERE thread_id = $1 ORDER BY created_at ASC";
+//     let rows = client.query(query, &[&thread_id]).await?;
+
+//     let mut conversation = String::new();
+//     for row in rows {
+//         let sender: String = row.get("sender");
+//         let content: String = row.get("content");
+//         conversation.push_str(&format!("{}: {}\n", sender, content));
+//     }
+
+//     // Create a new initial message for the assistant to summarize the conversation
+//     let summarize_request = format!("{}", conversation);
+
+//     // Use the designated assistant to handle the summarization (asst_wjKt6A8SZxyywRtyHGSgbJu1)
+//     let summarizing_assistant_id = "asst_wjKt6A8SZxyywRtyHGSgbJu1";
+
+//     // Get or create a thread and log the user's request message
+//     let (new_thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id, summarizing_assistant_id, openai_key, &summarize_request).await?;
+
+//     if let Err(e) = crate::database::insert_message(pool.clone(), &new_thread_id, "user", &summarize_request, "text", summarizing_assistant_id).await {
+//         log::error!("Failed to log user message: {:?}", e);
+//     }
+
+//     // Call first_loop to process the summarization request
+//     let response_result = if is_new_thread {
+//         first_loop(openai_key, &new_thread_id, summarizing_assistant_id).await
+//     } else {
+//         second_message_and_so_on(openai_key, &new_thread_id, &summarize_request, summarizing_assistant_id).await
+//     };
+
+//     match response_result {
+//         Ok(response_value) => {
+//             if let Err(e) = crate::database::insert_message(pool.clone(), &new_thread_id, "assistant", &response_value, "text", summarizing_assistant_id).await {
+//                 log::error!("Failed to log assistant message: {:?}", e);
+//             }
+//             bot.send_message(ChatId(chat_id), response_value).await?;
+//         },
+//         Err(e) => {
+//             log::error!("Failed to process summarization request: {:?}", e);
+//             bot.send_message(ChatId(chat_id), "Failed to summarize conversation. Please try again later.").await?;
+//         }
+//     }
+
+//     Ok(())
+// }
+
+// async fn process_text_message(
+//     bot: &Bot,
+//     pool: &deadpool_postgres::Pool,
+//     message: &teloxide::prelude::Message,
+//     user_id: i64,
+//     text: &str,
+//     openai_key: &str,
+//     assistant_id: &str
+// ) -> Result<(), anyhow::Error> {
+//     let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(pool, user_id, assistant_id, openai_key, text).await?;
+    
+//     if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "user", text, "text", assistant_id).await {
+//         log::error!("Failed to log user message: {:?}", e);
+//     }
+
+//     let response_result = if is_new_thread {
+//         first_loop(openai_key, &thread_id, assistant_id).await
+//     } else {
+//         second_message_and_so_on(openai_key, &thread_id, text, assistant_id).await
+//     };
+
+//     match response_result {
+//         Ok(response_value) => {
+//             bot.send_message(message.chat.id, response_value).await?;
+//         },
+//         Err(e) => {
+//             log::error!("Failed to process message: {:?}", e);
+//             bot.send_message(message.chat.id, "Failed to process message. Please try again later.").await?;
+//         }
+//     }
+
+//     Ok(())
+// }
+
+// async fn process_audio_message(
+//     bot: &Bot,
+//     pool: &deadpool_postgres::Pool,
+//     message: &teloxide::prelude::Message,
+//     user_id: i64,
+//     audio: teloxide::types::Audio,
+//     openai_key: &str,
+//     bot_token: &str,
+//     assistant_id: &str
+// ) -> Result<(), anyhow::Error> {
+//     let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
+//     let chat_id = message.chat.id;
+
+//     let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(pool, user_id, assistant_id, openai_key, "Audio message initiated thread").await?;
+
+//     if let Some(ref mut custom_audio) = &mut custom_message.audio {
+//         match crate::telegram::get_file_path(&custom_audio.file_id, bot_token).await {
+//             Ok(file_path) => {
+//                 custom_audio.file_path = Some(file_path);
+//                 match handle_audio_message(bot_token, &custom_audio, openai_key).await {
+//                     Ok(transcription) => {
+//                         if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "user", &transcription, "audio", assistant_id).await {
+//                             log::error!("Failed to log user message: {:?}", e);
+//                         }
+
+//                         let response_result = if is_new_thread {
+//                             first_loop(openai_key, &thread_id, assistant_id).await
+//                         } else {
+//                             second_message_and_so_on(openai_key, &thread_id, &transcription, assistant_id).await
+//                         };
+
+//                         match response_result {
+//                             Ok(response_value) => {
+//                                 bot.send_message(chat_id, response_value).await?;
+//                             },
+//                             Err(e) => {
+//                                 log::error!("Failed to process message: {:?}", e);
+//                                 bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
+//                             }
+//                         }
+//                     },
+//                     Err(e) => {
+//                         log::error!("Failed to handle audio message: {:?}", e);
+//                         bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
+//                     }
+//                 }
+//             },
+//             Err(e) => {
+//                 log::error!("Failed to retrieve file path: {:?}", e);
+//                 bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
+//             }
+//         }
+//     }
+
+//     Ok(())
+// }
+
+// async fn process_voice_message(
+//     bot: &Bot,
+//     pool: &deadpool_postgres::Pool,
+//     message: &teloxide::prelude::Message,
+//     user_id: i64,
+//     voice: teloxide::types::Voice,
+//     openai_key: &str,
+//     bot_token: &str,
+//     assistant_id: &str
+// ) -> Result<(), anyhow::Error> {
+//     let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
+//     let chat_id = message.chat.id;
+
+//     let (thread_id, is_new_thread) = crate::telegram::get_or_create_thread(pool, user_id, assistant_id, openai_key, "Voice message initiated thread").await?;
+
+//     if let Some(ref mut custom_voice) = &mut custom_message.voice {
+//         match crate::telegram::get_file_path(&custom_voice.file_id, bot_token).await {
+//             Ok(file_path) => {
+//                 custom_voice.file_path = Some(file_path);
+//                 match handle_voice_message(bot_token, &custom_voice, openai_key).await {
+//                     Ok(transcription) => {
+//                         if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "user", &transcription, "voice", assistant_id).await {
+//                             log::error!("Failed to log user message: {:?}", e);
+//                         }
+
+//                         let response_result = if is_new_thread {
+//                             first_loop(openai_key, &thread_id, assistant_id).await
+//                         } else {
+//                             second_message_and_so_on(openai_key, &thread_id, &transcription, assistant_id).await
+//                         };
+
+//                         match response_result {
+//                             Ok(response_value) => {
+//                                 bot.send_message(chat_id, response_value).await?;
+//                             },
+//                             Err(e) => {
+//                                 log::error!("Failed to process message: {:?}", e);
+//                                 bot.send_message(chat_id, "Failed to process message. Please try again later.").await?;
+//                             }
+//                         }
+//                     },
+//                     Err(e) => {
+//                         log::error!("Failed to handle voice message: {:?}", e);
+//                         bot.send_message(chat_id, "Failed to process your voice message. Please try again later.").await?;
+//                     }
+//                 }
+//             },
+//             Err(e) => {
+//                 log::error!("Failed to retrieve file path: {:?}", e);
+//                 bot.send_message(chat_id, "Failed to process your voice message. Please try again later.").await?;
+//             }
+//         }
+//     }
+
+//     Ok(())
+// }
 
 // pub async fn users_second_message_window(
 //     bot: Bot,
