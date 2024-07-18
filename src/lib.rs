@@ -82,7 +82,12 @@ pub struct DBUser {
     pub username: Option<String>,
 }
 
-
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct PreProcessingResult {
+    qualified_to_respond: String,
+    interest_level: i32,
+    respond_cue: Option<i32>,
+}
 
 
 
@@ -717,6 +722,10 @@ pub async fn send_next_message(thread_id: &str, text: &str) -> anyhow::Result<()
     Ok(())
 }
 
+
+
+//      PRE-PROCESSING RELATED 
+//          ---     --  --
 pub async fn pre_process_message(openai_key: &str, message: &str) -> Result<(String, String, String), anyhow::Error> {
     let client = reqwest::Client::new();
 
@@ -752,7 +761,44 @@ pub async fn pre_process_message(openai_key: &str, message: &str) -> Result<(Str
     Ok((variable1, variable2, variable3))
 }
 
+// Define the function to parse the response
+fn parse_pre_processing_response(response: &str) -> Result<PreProcessingResult, anyhow::Error> {
+    // Define the regex patterns for each field
+    let re_qualified = regex::Regex::new(r"Qualified to Respond\?\s*(\w+)").unwrap();
+    let re_interest = regex::Regex::new(r"Interest Level:\s*(\d+)").unwrap();
+    let re_cue = regex::Regex::new(r"Respond Cue:\s*(\w+)").unwrap();
 
+    // Initialize the variables with default values
+    let qualified_to_respond = re_qualified
+        .captures(response)
+        .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
+        .ok_or_else(|| anyhow::anyhow!("Qualified to Respond? not found"))?;
+
+    let interest_level: i32 = re_interest
+        .captures(response)
+        .and_then(|caps| caps.get(1).map(|m| m.as_str()))
+        .ok_or_else(|| anyhow::anyhow!("Interest Level not found"))?
+        .parse()?;
+
+    let respond_cue = re_cue
+        .captures(response)
+        .and_then(|caps| caps.get(1).map(|m| m.as_str()))
+        .map(|val| {
+            if val == "N/A" || val == "n/A" || val == "n/a" || val == "N/a" || val == "na" || val == "nA" || val == "NA" || val == "Na" {
+                None
+            } else {
+                Some(val.parse().unwrap())
+            }
+        })
+        .flatten();
+
+    // Construct the result
+    Ok(PreProcessingResult {
+        qualified_to_respond,
+        interest_level,
+        respond_cue,
+    })
+}
 
 
 

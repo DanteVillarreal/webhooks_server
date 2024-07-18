@@ -480,9 +480,11 @@ async fn handle_buffered_messages(
     assistant_id: String,
 ) {
     let mut user_states = USER_STATES.write().await;
+    //  TODO: get user's message linked to the same assistant. because if we intercept the same uer's message but going to another assistant, 
+    //      we dont want to concatenate THAT message too
     if let Some(user_state) = user_states.get_mut(&user_id) {
-        log::info!("Processing buffered messages for user_id: {}", user_id);
-        
+        log::info!("In handle_buffered_messages. Processing buffered messages for user_id: {}", user_id);
+
         // Concatenate all messages into a single string
         let concatenated_messages: String = user_state
             .messages
@@ -495,57 +497,160 @@ async fn handle_buffered_messages(
         user_state.messages.clear();
         log::info!("User message buffer cleared for user_id: {}", user_id);
 
-        // Pre-process the concatenated messages
-        let (variable1, variable2, variable3) = match crate::pre_process_message(&openai_key, &concatenated_messages).await {
-            Ok(vars) => vars,
+        // Step 1: Pre-process the concatenated message with Analyzing AI. 
+        //      goal is to get response from Analyzing AI
+        let analyzing_ai_id = "asst_JjoQ4OUjIgdhTgA9fiAIeRQu";
+        //step 1a: send message to Analyzing AI to get/create a thread.
+        let (analyzing_thread_id, is_new_thread) = match crate::telegram::get_or_create_thread(&pool, user_id as i64, analyzing_ai_id, &openai_key, &concatenated_messages).await {
+            Ok(v) => v,
             Err(e) => {
-                log::error!("Failed to pre-process messages: {:?}", e);
+                log::error!("Failed to get or create Analyzing AI thread: {:?}", e);
                 bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
                 return;
             }
         };
 
-        // Insert the pre-processing results into the database
-        if let Err(e) = crate::database::insert_pre_processing_results(&pool, user_id, &variable1, &variable2, &variable3).await {
-            log::error!("Failed to log pre-processing results: {:?}", e);
-        }
-
-        let thread_id = match crate::telegram::get_or_create_thread(&pool, user_id as i64, &assistant_id, &openai_key, &concatenated_messages).await {
-            Ok((thread_id, _)) => thread_id,
-            Err(e) => {
-                log::error!("Failed to get or create thread: {:?}", e);
-                bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
-                return;
-            }
-        };
-
-        if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "user", &concatenated_messages, "text", &assistant_id).await {
-            log::error!("Failed to log user messages: {:?}", e);
-        }
-
-        // Include the pre-processed variables in the final processing
-        let final_message = format!("Pre-processing results:\n{}\n{}\n{}\nUser messages:\n{}",
-                                    variable1, variable2, variable3, concatenated_messages);
-
-        // Process the concatenated messages with the pre-processing results
-        let response_result = match crate::telegram::second_message_and_so_on(&openai_key, &thread_id, &final_message, &assistant_id).await {
-            Ok(response_value) => {
-                if let Err(e) = crate::database::insert_message(pool.clone(), &thread_id, "assistant", &response_value, "text", &assistant_id).await {
-                    log::error!("Failed to log assistant message: {:?}", e);
+        log::info!("handle_buffered_messages: finished step 1a. got/created the thread");
+        //step 1b: run thread and receive response from Analyzing AI
+        let response_text = if is_new_thread {
+            match crate::first_loop(&openai_key, &analyzing_thread_id, analyzing_ai_id).await {
+                Ok(response) => response,
+                Err(e) => {
+                    log::error!("Failed to run first loop with Analyzing AI: {:?}", e);
+                    bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                    return;
                 }
-                bot.send_message(chat_id, response_value).await.ok();
-                Ok(())
-            },
-            Err(e) => {
-                log::error!("Failed to process messages: {:?}", e);
-                bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
-                Err(e)
+            }
+        } else {
+            match crate::second_message_and_so_on(&openai_key, &analyzing_thread_id, &concatenated_messages, analyzing_ai_id).await {
+                Ok(response) => response,
+                Err(e) => {
+                    log::error!("Failed to run subsequent loop with Analyzing AI: {:?}", e);
+                    bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                    return;
+                }
             }
         };
 
-        if let Err(e) = response_result {
-            log::error!("Failed to send response: {:?}", e);
+        log::info!("handle_buffered_messages: finished step 1b. ran thread and received response form Analyzing AI");
+        // //step 1c: insert user's concatenated message into database. CHECK IF IT IS ACTUALLY DOING THIS!!!!!!!!!!!!!!!!6548905!!!!!!!!!!!!!!!!!
+        // if let Err(e) = crate::database::insert_message(
+        //     pool.clone(),
+        //     &analyzing_thread_id,
+        //     "assistant",
+        //     &response_text,
+        //     "text",
+        //     analyzing_ai_id,
+        // ).await {
+        //     log::error!("Failed to log Analyzing AI response: {:?}", e);
+        // }
+
+        // Step 2: Parse the Analyzing AI response
+        let parsed_results = match crate::parse_pre_processing_response(&response_text) {
+            Ok(result) => result,
+            Err(e) => {
+                log::error!("Failed to parse Analyzing AI response: {:?}", e);
+                bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                return;
+            }
+        };
+
+        // // Step 3: Insert parsed variables into the database.       CHECK IF DOING THIS CORRECTLY
+        // if let Err(e) = crate::database::insert_pre_processing_results(
+        //     &pool,
+        //     user_id,
+        //     &convo_thread_id,
+        //     &parsed_results.qualified_to_respond,
+        //     &parsed_results.interest_level.to_string(),
+        //     &parsed_results.respond_cue,
+        // ).await {
+        //     log::error!("Failed to log pre-processing results: {:?}", e);
+        // }
+
+        // Step 4: Combine the original user message and parsed information into a final message .  DO THIS IN REVERSE ORDER.
+        let final_message = format!(
+            "\n\nPre-processing results:\nQualified to Respond? {}\nInterest Level: {}\nRespond Cue: {:?}Original message:\n{}",
+            parsed_results.qualified_to_respond,
+            parsed_results.interest_level,
+            parsed_results.respond_cue,
+            concatenated_messages,
+        );
+
+        // Step 5: Process with Convo AI. Goal is to get response from Convo AI
+        // Step 5a: sending final_message to assistant's endpoint to get/create a thread
+        let (convo_thread_id, is_new_thread) = match crate::telegram::get_or_create_thread(&pool, user_id as i64, &assistant_id, &openai_key, &final_message).await {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("Failed to get or create Convo AI thread: {:?}", e);
+                bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                return;
+            }
+        };
+
+            //step 1c: insert user's concatenated message into database.
+            //moved here so that we connect it to convo_thread_id
+            if let Err(e) = crate::database::insert_message(
+                pool.clone(),
+                &convo_thread_id,
+                "assistant",
+                &response_text,
+                "text",
+                analyzing_ai_id,
+            ).await {
+                log::error!("Failed to log Analyzing AI response: {:?}", e);
+            }
+
+            // Step 3: Insert parsed variables into the database.  
+            //moved here so that we connect it to convo_thread_id
+            if let Err(e) = crate::database::insert_pre_processing_results(
+                &pool,
+                user_id,
+                &convo_thread_id,
+                parsed_results.interest_level,
+                None,
+                parsed_results.respond_cue,
+            ).await {
+                log::error!("Failed to log pre-processing results: {:?}", e);
+            }
+
+        // Step 5b: run thread and receive response from Convo AI
+        let convo_response_text = if is_new_thread {
+            match crate::first_loop(&openai_key, &convo_thread_id, &assistant_id).await {
+                Ok(response) => response,
+                Err(e) => {
+                    log::error!("Failed to run first loop with Convo AI: {:?}", e);
+                    bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                    return;
+                }
+            }
+        } else {
+            match crate::second_message_and_so_on(&openai_key, &convo_thread_id, &final_message, &assistant_id).await {
+                Ok(response) => response,
+                Err(e) => {
+                    log::error!("Failed to run subsequent loop with Convo AI: {:?}", e);
+                    bot.send_message(chat_id, "Failed to process messages. Please try again later.").await.ok();
+                    return;
+                }
+            }
+        };
+
+
+        //  INSERT RESPONSE CUE HERE.
+
+
+        // Insert Convo AI response into the database and send to user
+        if let Err(e) = crate::database::insert_message(
+            pool.clone(),
+            &convo_thread_id,
+            "assistant",
+            &convo_response_text,
+            "text",
+            &assistant_id,
+        ).await {
+            log::error!("Failed to log Convo AI response: {:?}", e);
         }
+
+        bot.send_message(chat_id, convo_response_text).await.ok();
     }
 }
 // async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, assistant_id: &str, openai_key: &str, initial_message: &str) -> Result<String, anyhow::Error> {

@@ -65,20 +65,27 @@ pub async fn get_thread_by_user_id_and_assistant(pool: deadpool_postgres::Pool, 
 pub async fn insert_pre_processing_results(
     pool: &deadpool_postgres::Pool,
     user_id: u64,
-    variable1: &str,
-    variable2: &str,
-    variable3: &str,
+    thread_id: &str,
+    interest: i32,
+    user_response_time: Option<i32>,
+    response_cue: Option<i32>,
 ) -> Result<(), anyhow::Error> {
     let client = pool.get().await.map_err(|e| {
         log::error!("Failed to get client from pool: {:?}", e);
         anyhow::Error::new(e)
     })?;
 
-    let user_id = user_id as i64 ;
-    // Add your custom logic to insert the variables into your new tables
+    let user_id = user_id as i64; 
+
+    // If response_cue is None, then set response to 99999
+    let response_cue = response_cue.unwrap_or(99999);
+
+    //if user_response_time is None, then set user_response_time to 69 as default
+    let user_response_time = user_response_time.unwrap_or(69);
+
     client.execute(
-        "INSERT INTO pre_processing_results (user_id, variable1, variable2, variable3) VALUES ($1, $2, $3, $4)",
-        &[&user_id, &variable1, &variable2, &variable3]
+        "INSERT INTO metrics (user_id, thread_id, interest, user_response_time, response_cue) VALUES ($1, $2, $3, $4, $5)",
+        &[&user_id, &thread_id, &interest, &user_response_time, &response_cue]
     ).await?;
     
     Ok(())
