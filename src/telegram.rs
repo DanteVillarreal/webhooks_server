@@ -703,42 +703,55 @@ async fn handle_text_message_logic(
         log::info!("Existing timer reset for user_id: {}", user_id);
     }
 
-    // Handle the buffered messages, get the return values
-    let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
-        user_id as u64,
-        pool.clone(),
-        bot.clone(),
-        chat_id,
-        openai_key.clone(),
-        assistant_id.clone(),
-    ).await?;
+    // Start or restart the initial 15-second timer
+    let initial_delay_seconds = 15;
+    let pool_clone = pool.clone();
+    let bot_clone = bot.clone();
+    let chat_id_clone = chat_id;
+    let openai_key_clone = openai_key.clone();
+    let assistant_id_clone = assistant_id.clone();
+    let user_id_clone = user_id as u64;
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(initial_delay_seconds)).await;
 
-    // Creating a new timer based on respond_cue
-    if let Some(delay_seconds) = respond_cue {
-        log::info!("Starting new respond cue timer {}-second timer for user_id: {}", delay_seconds, user_id);
-        tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
-        
-        let mut user_states = USER_STATES.write().await;
-        if let Some(user_state) = user_states.get(&(user_id as u64)) {
-            if user_state.messages.is_empty() {
-                if let Err(e) = crate::database::insert_message(
-                    pool.clone(),
-                    &convo_thread_id,
-                    "assistant",
-                    &convo_response_text,
-                    "text",
-                    &assistant_id,
-                ).await {
-                    log::error!("Failed to log Convo AI response: {:?}", e);
+        let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
+            user_id_clone,
+            pool_clone,
+            bot_clone,
+            chat_id_clone,
+            openai_key_clone,
+            assistant_id_clone,
+        ).await.unwrap();
+
+        // Creating a new timer based on respond_cue
+        if let Some(delay_seconds) = respond_cue {
+            log::info!("Starting new respond cue timer {}-second timer for user_id: {}", delay_seconds, user_id_clone);
+            tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
+            
+            let mut user_states = USER_STATES.write().await;
+            if let Some(user_state) = user_states.get(&(user_id_clone)) {
+                if user_state.messages.is_empty() {
+                    if let Err(e) = crate::database::insert_message(
+                        pool.clone(),
+                        &convo_thread_id,
+                        "assistant",
+                        &convo_response_text,
+                        "text",
+                        &assistant_id,
+                    ).await {
+                        log::error!("Failed to log Convo AI response: {:?}", e);
+                    }
+                    bot.send_message(chat_id, convo_response_text).await.ok();
+                } else {
+                    log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id_clone);
+                    return;
                 }
-                bot.send_message(chat_id, convo_response_text).await.ok();
-            } else {
-                log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
-                return Ok(()); // Use return to exit early
             }
         }
-    }
-    
+    });
+
+    user_state.timer = Some(handle);
+
     Ok(())
 }
 
