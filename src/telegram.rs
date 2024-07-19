@@ -694,17 +694,27 @@ async fn handle_text_message_logic(
     let mut user_states = USER_STATES.write().await;
     let user_state = user_states.entry(user_id as u64).or_default();
 
-    // If there is an existing timer, do not process the message immediately but log it
-    if let Some(timer) = &user_state.timer {
-        log::info!("Timer already running for user_id: {}", user_id);
+    // Check if the message is already in the buffer to prevent reprocessing
+    let is_duplicate = user_state.messages.iter().any(|msg| msg.message_id == message.id.0 as u64);
+    
+    // Only add the message to the buffer if it is not a duplicate
+    if !is_duplicate {
         user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
+    } else {
+        // Log and return early if the message is a duplicate
+        log::info!("Duplicate message received for user_id: {}", user_id);
         return Ok(());
     }
 
-    // If existing timer path is not taken, add the current message to the buffer.
-    user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
+    // If there is an existing timer, cancel it
+    if let Some(timer) = user_state.timer.take() {
+        log::info!("Existing timer cancelled for user_id: {}", user_id);
+        timer.abort();
+    }
 
     log::info!("Starting initial timer for user_id: {}", user_id);
+    
+    // Clone variables for the async task
     let pool_clone = pool.clone();
     let bot_clone = bot.clone();
     let bot_clone2 = bot_clone.clone();
