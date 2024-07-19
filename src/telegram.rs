@@ -715,7 +715,7 @@ async fn handle_text_message_logic(
 
     // Creating a new timer based on respond_cue
     if let Some(delay_seconds) = respond_cue {
-        log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
+        log::info!("Starting new respond cue timer {}-second timer for user_id: {}", delay_seconds, user_id);
         tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
         
         let mut user_states = USER_STATES.write().await;
