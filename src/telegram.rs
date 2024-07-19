@@ -681,11 +681,11 @@ async fn handle_buffered_messages(
 
 
 async fn handle_text_message_logic(
-    message: teloxide::prelude::Message, 
+    message: teloxide::prelude::Message,
     pool: deadpool_postgres::Pool,
-    bot: teloxide::Bot, 
-    user_id: i64, 
-    chat_id: teloxide::types::ChatId, 
+    bot: teloxide::Bot,
+    user_id: i64,
+    chat_id: teloxide::types::ChatId,
     openai_key: String,
     assistant_id: String,
 ) -> Result<(), anyhow::Error> {
@@ -694,14 +694,15 @@ async fn handle_text_message_logic(
     let mut user_states = USER_STATES.write().await;
     let user_state = user_states.entry(user_id as u64).or_default();
 
-    // Add message to buffer
-    user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
-
-    // If there's an existing timer, cancel it
-    if let Some(timer) = user_state.timer.take() {
-        timer.abort();
-        log::info!("Existing timer cancelled for user_id: {}", user_id);
+    // If there is an existing timer, do not process the message immediately but log it
+    if let Some(timer) = &user_state.timer {
+        log::info!("Timer already running for user_id: {}", user_id);
+        user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
+        return Ok(());
     }
+
+    // If existing timer path is not taken, add the current message to the buffer.
+    user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
 
     log::info!("Starting initial timer for user_id: {}", user_id);
     let pool_clone = pool.clone();
@@ -715,7 +716,7 @@ async fn handle_text_message_logic(
     user_state.timer = Some(tokio::spawn(async move {
         log::info!("Timer task spawned for user_id: {}", user_id_clone);
         if let Err(e) = async {
-            log::info!("about to sleep for 15 seconds");
+            log::info!("About to sleep for 15 seconds for user_id: {}", user_id_clone);
             tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
             log::info!("Initial timer expired for user_id: {}", user_id_clone);
 
@@ -759,7 +760,7 @@ async fn handle_text_message_logic(
             log::error!("Error in timer task for user_id: {}: {:?}", user_id_clone, e);
         }
     }));
-    
+
     Ok(())
 }
 
