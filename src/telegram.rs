@@ -712,53 +712,56 @@ async fn handle_text_message_logic(
     let user_id_clone = user_id as u64;
 
     user_state.timer = Some(tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
-        log::info!("Initial timer expired for user_id: {}", user_id_clone);
+        log::info!("Timer task spawned for user_id: {}", user_id_clone);
+        if let Err(e) = async {
+            log::info!("about to sleep for 15 seconds");
+            tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+            log::info!("Initial timer expired for user_id: {}", user_id_clone);
 
-        let pool_clone_inner = pool.clone();
-        let bot_clone_inner = bot.clone();
-        let chat_id_clone_inner = chat_id;
-        let openai_key_clone_inner = openai_key.clone();
-        let assistant_id_clone_inner = assistant_id.clone();
+            let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
+                user_id_clone,
+                pool_clone,
+                bot_clone,
+                chat_id_clone,
+                openai_key_clone,
+                assistant_id_clone,
+            ).await?;
 
-        let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
-            user_id_clone,
-            pool_clone_inner,
-            bot_clone_inner,
-            chat_id_clone_inner,
-            openai_key_clone_inner,
-            assistant_id_clone_inner,
-        ).await.unwrap();
-
-        // Creating a new timer based on respond_cue
-        if let Some(delay_seconds) = respond_cue {
-            log::info!("Starting new respond cue timer {}-second timer for user_id: {}", delay_seconds, user_id_clone);
-            tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
-            let mut user_states = USER_STATES.write().await;
-            if let Some(user_state) = user_states.get(&(user_id_clone)) {
-                if user_state.messages.is_empty() {
-                    let pool_clone_inner2 = pool.clone(); // Clone again for further use
-                    let assistant_id_clone_inner2 = assistant_id.clone();
-                    if let Err(e) = crate::database::insert_message(
-                        pool_clone_inner2,
-                        &convo_thread_id,
-                        "assistant",
-                        &convo_response_text,
-                        "text",
-                        &assistant_id_clone_inner2,
-                    ).await {
-                        log::error!("Failed to log Convo AI response: {:?}", e);
+            // Creating a new timer based on respond_cue
+            if let Some(delay_seconds) = respond_cue {
+                log::info!("Starting new respond cue timer {}-second timer for user_id: {}", delay_seconds, user_id_clone);
+                tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
+                let mut user_states = USER_STATES.write().await;
+                if let Some(user_state) = user_states.get(&(user_id_clone)) {
+                    if user_state.messages.is_empty() {
+                        let pool_clone_inner2 = pool.clone(); // Clone again for further use
+                        let assistant_id_clone_inner2 = assistant_id.clone();
+                        if let Err(e) = crate::database::insert_message(
+                            pool_clone_inner2,
+                            &convo_thread_id,
+                            "assistant",
+                            &convo_response_text,
+                            "text",
+                            &assistant_id_clone_inner2,
+                        ).await {
+                            log::error!("Failed to log Convo AI response: {:?}", e);
+                        }
+                        bot_clone.send_message(chat_id_clone, convo_response_text).await.ok();
+                    } else {
+                        log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id_clone);
                     }
-                    bot_clone.send_message(chat_id_clone, convo_response_text).await.ok();
-                } else {
-                    log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id_clone);
                 }
             }
+
+            Ok::<(), anyhow::Error>(())
+        }.await {
+            log::error!("Error in timer task for user_id: {}: {:?}", user_id_clone, e);
         }
     }));
     
     Ok(())
 }
+
 
 async fn handle_audio_message_logic(
     message: teloxide::prelude::Message, 
