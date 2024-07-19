@@ -609,7 +609,7 @@ async fn handle_buffered_messages(
         let analyzing_ai_id = "asst_JjoQ4OUjIgdhTgA9fiAIeRQu";
         // Step 1a: Send message to Analyzing AI to get/create a thread.
         let (analyzing_thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id as i64, analyzing_ai_id, &openai_key, &concatenated_messages).await?;
-
+        log::info!("in handle_buffed_messages. just got the new thread {}. is it new? {}", &analyzing_thread_id, &is_new_thread);
         // Step 1b: Run thread and receive response from Analyzing AI
         let response_text = if is_new_thread {
             crate::first_loop(&openai_key, &analyzing_thread_id, analyzing_ai_id).await?
@@ -696,6 +696,7 @@ async fn handle_text_message_logic(
 
     // Add message to buffer
     user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
+    log::info!("message added to buffer");
 
     // If there's an existing timer, cancel it
     if let Some(timer) = user_state.timer.take() {
@@ -704,6 +705,7 @@ async fn handle_text_message_logic(
     }
 
     // Start or restart the initial 15-second timer
+    log::info!("in process of re/starting the 15 second timer");
     let initial_delay_seconds = 15;
     let pool_clone = pool.clone();
     let bot_clone = bot.clone();
