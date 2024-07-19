@@ -706,6 +706,7 @@ async fn handle_text_message_logic(
     log::info!("Starting initial timer for user_id: {}", user_id);
     let pool_clone = pool.clone();
     let bot_clone = bot.clone();
+    let bot_clone2 = bot_clone.clone();
     let chat_id_clone = chat_id;
     let openai_key_clone = openai_key.clone();
     let assistant_id_clone = assistant_id.clone();
@@ -746,7 +747,7 @@ async fn handle_text_message_logic(
                         ).await {
                             log::error!("Failed to log Convo AI response: {:?}", e);
                         }
-                        bot_clone.send_message(chat_id_clone, convo_response_text).await.ok();
+                        bot_clone2.send_message(chat_id_clone, convo_response_text).await.ok();
                     } else {
                         log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id_clone);
                     }
