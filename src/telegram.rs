@@ -99,6 +99,179 @@ pub fn convert_teloxide_message_to_custom(message: teloxide::prelude::Message) -
 }
 
 
+
+// pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
+//     let bot = teloxide::Bot::from_env();
+//     log::info!("Bot started");
+//     let openai_key = std::env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
+//     let assistant_id = "asst_ybfxpPMxcuj7GZkwELR6sttt".to_string();
+
+//     teloxide::repl(bot.clone(), move |message: teloxide::prelude::Message, bot: teloxide::Bot| {
+//         let openai_key = openai_key.clone();
+//         let assistant_id = assistant_id.clone();
+//         let bot_token = std::env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN not set");
+//         let pool = pool.clone();
+
+//         async move {
+//             let result: anyhow::Result<()> = async {
+//                 let user_id = message.from()
+//                     .ok_or_else(|| anyhow::anyhow!("User not found in message"))
+//                     .map(|user| user.id.0 as i64)?;
+
+//                 let db_user = crate::DBUser {
+//                     id: user_id,
+//                     first_name: Some(message.from().unwrap().first_name.clone()), // value from Telegram API, always Some
+//                     last_name: Some(message.from().unwrap().last_name.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
+//                     username: Some(message.from().unwrap().username.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
+//                 };
+
+//                 if let Err(e) = crate::database::insert_user(pool.clone(), db_user).await {
+//                     log::error!("Failed to insert or update user: {:?}", e);
+//                 }
+
+//                 if let Some(text) = message.text() {
+//                     log::info!("Received message: {}", text);
+
+//                     // Cancel the existing timer if it exists
+//                     let mut user_states = USER_STATES.write().await;
+//                     let user_state = user_states.entry(user_id as u64).or_default();
+//                     if let Some(timer) = user_state.timer.take() {
+//                         timer.abort();
+//                         log::info!("Existing timer canceled for user_id: {}", user_id);
+//                     }
+
+//                     // Buffer the new message
+//                     user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
+//                     log::info!("Message buffered for user_id: {}", user_id);
+
+//                     // Process buffered messages
+//                     let (respond_cue, convo_response_text, convo_thread_id) =
+//                         crate::telegram::handle_buffered_messages(
+//                             user_id as u64, pool.clone(), bot.clone(), message.chat.id, openai_key.clone(), assistant_id.clone()
+//                         ).await?;
+
+//                     // Creating a new timer based on respond_cue
+//                     if let Some(delay_seconds) = respond_cue {
+//                         log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
+
+//                         // Start a new timer
+//                         let bot_clone = bot.clone();
+//                         let pool_clone = pool.clone();
+//                         user_state.timer = Some(tokio::spawn(async move {
+//                             tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
+
+//                             // Ensure we're not interrupted by new messages before sending the response
+//                             let mut user_states = USER_STATES.write().await;
+//                             if let Some(user_state) = user_states.get(&(user_id as u64)) {
+//                                 if user_state.messages.is_empty() {
+//                                     // Insert Convo AI response into the database and send to user
+//                                     if let Err(e) = crate::database::insert_message(
+//                                         pool_clone,
+//                                         &convo_thread_id,
+//                                         "assistant",
+//                                         &convo_response_text,
+//                                         "text",
+//                                         &assistant_id,
+//                                     ).await {
+//                                         log::error!("Failed to log Convo AI response: {:?}", e);
+//                                     }
+
+//                                     bot_clone.send_message(message.chat.id, convo_response_text).await.ok();
+//                                 } else {
+//                                     log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
+//                                 }
+//                             }
+//                         }));
+//                     }
+                    
+
+//                 }
+
+//                 Ok(())
+//             }.await;
+//         } else if let Some(audio) = message.audio() {
+//             log::info!("Received audio message");
+
+//             // Cancel the existing timer if it exists
+//             let mut user_states = crate::USER_STATES.write().await;
+//             let user_state = user_states.entry(user_id as u64).or_default();
+//             if let Some(timer) = user_state.timer.take() {
+//                 timer.abort();
+//                 log::info!("Existing timer canceled for user_id: {}", user_id);
+//             }
+
+//             // Buffer the audio message
+//             user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
+//             log::info!("Audio message buffered for user_id: {}", user_id);
+
+//             // Process buffered messages
+//             let (respond_cue, convo_response_text, convo_thread_id) =
+//                 crate::telegram::handle_buffered_messages(
+//                     user_id as u64, pool.clone(), bot.clone(), message.chat.id, openai_key.clone(), assistant_id.clone()
+//                 ).await?;
+
+//             // Creating a new timer based on respond_cue
+//             if let Some(delay_seconds) = respond_cue {
+//                 log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
+
+//                 // Start a new timer
+//                 let bot_clone = bot.clone();
+//                 let pool_clone = pool.clone();
+//                 user_state.timer = Some(tokio::spawn(async move {
+//                     tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
+
+//                     // Ensure we're not interrupted by new messages before sending the response
+//                     let mut user_states = crate::USER_STATES.write().await;
+//                     if let Some(user_state) = user_states.get(&(user_id as u64)) {
+//                         if user_state.messages.is_empty() {
+//                             // Insert Convo AI response into the database and send to user
+//                             if let Err(e) = crate::database::insert_message(
+//                                 pool_clone,
+//                                 &convo_thread_id,
+//                                 "assistant",
+//                                 &convo_response_text,
+//                                 "text",
+//                                 &assistant_id,
+//                             ).await {
+//                                 log::error!("Failed to log Convo AI response: {:?}", e);
+//                             }
+
+//                             bot_clone.send_message(message.chat.id, convo_response_text).await.ok();
+//                         } else {
+//                             log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
+//                         }
+//                     }
+//                 }));
+//             }
+//         } else {
+//             // Handle other types of messages if needed
+//         }
+
+//         Ok(())
+//     }.await;
+
+//             if let Err(error) = result {
+//                 match &error.downcast_ref::<teloxide::RequestError>() {
+//                     Some(teloxide::RequestError::RetryAfter(duration)) => {
+//                         tokio::time::sleep(*duration).await;
+//                     },
+//                     Some(teloxide::RequestError::Api(api_error)) => {
+//                         log::error!("An error from the update listener: Api({})", api_error);
+//                     },
+//                     Some(teloxide::RequestError::Network(network_error)) => {
+//                         log::error!("An error from the update listener: Network({:?})", network_error);
+//                         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+//                     },
+//                     _ => {
+//                         log::error!("An unforeseen error from the update listener: {:?}", error);
+//                     }
+//                 }
+//             }
+
+//             teloxide::prelude::respond(())
+//         }
+//     }).await;
+// }
 pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
     let bot = teloxide::Bot::from_env();
     log::info!("Bot started");
@@ -113,227 +286,69 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
         let pool = pool.clone();
 
         async move {
-            let result: anyhow::Result<()> = async {
-                let user_id = message.from()
-                    .ok_or_else(|| anyhow::anyhow!("User not found in message"))
-                    .map(|user| user.id.0 as i64)?;
+            loop {
+                let result: anyhow::Result<()> = async {
+                    let user_id = message.from()
+                        .ok_or_else(|| anyhow::anyhow!("User not found in message"))
+                        .map(|user| user.id.0 as i64)?;
 
-                let db_user = crate::DBUser {
-                    id: user_id,
-                    first_name: Some(message.from().unwrap().first_name.clone()), // value from Telegram API, always Some
-                    last_name: Some(message.from().unwrap().last_name.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
-                    username: Some(message.from().unwrap().username.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
-                };
+                    let db_user = crate::DBUser {
+                        id: user_id,
+                        first_name: Some(message.from().unwrap().first_name.clone()), // value from Telegram API, always Some
+                        last_name: Some(message.from().unwrap().last_name.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
+                        username: Some(message.from().unwrap().username.clone().unwrap_or("N/A".to_string())), // convert None to "N/A"
+                    };
 
-                if let Err(e) = crate::database::insert_user(pool.clone(), db_user).await {
-                    log::error!("Failed to insert or update user: {:?}", e);
-                }
-
-                if let Some(text) = message.text() {
-                    log::info!("Received message: {}", text);
-                    let chat_id = message.chat.id;
-
-                    let mut user_states = USER_STATES.write().await;
-                    let user_state = user_states.entry(user_id as u64).or_default();
-
-                    // Add message to buffer
-                    user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
-
-                    // If there's an existing timer, cancel it
-                    if let Some(timer) = user_state.timer.take() {
-                        timer.abort();
-                        log::info!("Existing timer reset for user_id: {}", user_id);
+                    if let Err(e) = crate::database::insert_user(pool.clone(), db_user).await {
+                        log::error!("Failed to insert or update user: {:?}", e);
                     }
 
-                    // Handle the buffered messages, get the return values
-                    let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
-                        user_id as u64,
-                        pool.clone(),
-                        bot.clone(),
-                        chat_id,
-                        openai_key.clone(),
-                        assistant_id.clone(),
-                    ).await?;
-
-                    // Creating a new timer based on respond_cue
-                    if let Some(delay_seconds) = respond_cue {
-                        log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
-
-                        // Start a new timer
-                        let bot_clone = bot.clone();
-                        let pool_clone = pool.clone();
-                        user_state.timer = Some(tokio::spawn(async move {
-                            log::info!("now in timer for response cue.");
-                            tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
-
-                            // Ensure we're not interrupted by new messages before sending the response
-                            let mut user_states = USER_STATES.write().await;
-                            if let Some(user_state) = user_states.get(&(user_id as u64)) {
-                                if user_state.messages.is_empty() {
-                                    // Insert Convo AI response into the database and send to user
-                                    if let Err(e) = crate::database::insert_message(
-                                        pool_clone,
-                                        &convo_thread_id,
-                                        "assistant",
-                                        &convo_response_text,
-                                        "text",
-                                        &assistant_id,
-                                    ).await {
-                                        log::error!("Failed to log Convo AI response: {:?}", e);
-                                    }
-
-                                    bot_clone.send_message(chat_id, convo_response_text).await.ok();
-                                } else {
-                                    log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
-                                }
-                            }
-                        }));
+                    if let Some(text) = message.text() {
+                        handle_text_message_logic(
+                            message.clone(), pool.clone(), bot.clone(), 
+                            user_id, message.chat.id, openai_key.clone(), assistant_id.clone()
+                        ).await?;
                     }
-                } else if let Some(audio) = message.audio() {
-                    log::info!("Received audio message");
-                    
-                    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
-                    let chat_id = message.chat.id;
-
-                    // Buffer the audio message
-                    let mut user_states = USER_STATES.write().await;
-                    let user_state = user_states.entry(user_id as u64).or_default();
-                    user_state.messages.push(custom_message);
-                    
-                    // If there's an existing timer, cancel it
-                    if let Some(timer) = user_state.timer.take() {
-                        timer.abort();
-                        log::info!("Existing timer reset for user_id: {}", user_id);
+                    else if let Some(audio) = message.audio() {
+                        handle_audio_message_logic(
+                            message.clone(), pool.clone(), bot.clone(),
+                            user_id, message.chat.id, openai_key.clone(), assistant_id.clone()
+                        ).await?;
+                    }
+                    else if let Some(voice) = message.voice() {
+                        handle_voice_message_logic(
+                            message.clone(), pool.clone(), bot.clone(), 
+                            user_id, message.chat.id, openai_key.clone(), assistant_id.clone()
+                        ).await?;
+                    } 
+                    else {
+                        // Handle other types of messages if needed
                     }
 
-                    // Handle the buffered messages, get the return values
-                    let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
-                        user_id as u64,
-                        pool.clone(),
-                        bot.clone(),
-                        chat_id,
-                        openai_key.clone(),
-                        assistant_id.clone(),
-                    ).await?;
+                    Ok(())
+                }.await;
 
-                    // Creating a new timer based on respond_cue
-                    if let Some(delay_seconds) = respond_cue {
-                        log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
-
-                        // Start a new timer
-                        let bot_clone = bot.clone();
-                        let pool_clone = pool.clone();
-                        user_state.timer = Some(tokio::spawn(async move {
-                            tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
-
-                            // Ensure we're not interrupted by new messages before sending the response
-                            let mut user_states = USER_STATES.write().await;
-                            if let Some(user_state) = user_states.get(&(user_id as u64)) {
-                                if user_state.messages.is_empty() {
-                                    // Insert Convo AI response into the database and send to user
-                                    if let Err(e) = crate::database::insert_message(
-                                        pool_clone,
-                                        &convo_thread_id,
-                                        "assistant",
-                                        &convo_response_text,
-                                        "text",
-                                        &assistant_id,
-                                    ).await {
-                                        log::error!("Failed to log Convo AI response: {:?}", e);
-                                    }
-
-                                    bot_clone.send_message(chat_id, convo_response_text).await.ok();
-                                } else {
-                                    log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
-                                }
-                            }
-                        }));
-                    }
-                } else if let Some(voice) = message.voice() {
-                    log::info!("Received voice message");
-                    
-                    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
-                    let chat_id = message.chat.id;
-
-                    // Buffer the voice message
-                    let mut user_states = USER_STATES.write().await;
-                    let user_state = user_states.entry(user_id as u64).or_default();
-                    user_state.messages.push(custom_message);
-                    
-                    // If there's an existing timer, cancel it
-                    if let Some(timer) = user_state.timer.take() {
-                        timer.abort();
-                        log::info!("Existing timer reset for user_id: {}", user_id);
-                    }
-
-                    // Handle the buffered messages, get the return values
-                    let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
-                        user_id as u64,
-                        pool.clone(),
-                        bot.clone(),
-                        chat_id,
-                        openai_key.clone(),
-                        assistant_id.clone(),
-                    ).await?;
-
-                    // Creating a new timer based on respond_cue
-                    if let Some(delay_seconds) = respond_cue {
-                        log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
-
-                        // Start a new timer
-                        let bot_clone = bot.clone();
-                        let pool_clone = pool.clone();
-                        user_state.timer = Some(tokio::spawn(async move {
-                            tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
-
-                            // Ensure we're not interrupted by new messages before sending the response
-                            let mut user_states = USER_STATES.write().await;
-                            if let Some(user_state) = user_states.get(&(user_id as u64)) {
-                                if user_state.messages.is_empty() {
-                                    // Insert Convo AI response into the database and send to user
-                                    if let Err(e) = crate::database::insert_message(
-                                        pool_clone,
-                                        &convo_thread_id,
-                                        "assistant",
-                                        &convo_response_text,
-                                        "text",
-                                        &assistant_id,
-                                    ).await {
-                                        log::error!("Failed to log Convo AI response: {:?}", e);
-                                    }
-
-                                    bot_clone.send_message(chat_id, convo_response_text).await.ok();
-                                } else {
-                                    log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
-                                }
-                            }
-                        }));
-                    }
-                } else {
-                    // Handle other types of messages if needed
-                }
-
-                Ok(())
-            }.await;
-
-            if let Err(error) = result {
-                match &error.downcast_ref::<teloxide::RequestError>() {
-                    Some(teloxide::RequestError::RetryAfter(duration)) => {
-                        tokio::time::sleep(*duration).await;
-                    },
-                    Some(teloxide::RequestError::Api(api_error)) => {
-                        log::error!("An error from the update listener: Api({})", api_error);
-                    },
-                    Some(teloxide::RequestError::Network(network_error)) => {
-                        log::error!("An error from the update listener: Network({:?})", network_error);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                    },
-                    _ => {
-                        log::error!("An unforeseen error from the update listener: {:?}", error);
+                if let Err(error) = result {
+                    match &error.downcast_ref::<teloxide::RequestError>() {
+                        Some(teloxide::RequestError::RetryAfter(duration)) => {
+                            tokio::time::sleep(*duration).await;
+                        },
+                        Some(teloxide::RequestError::Api(api_error)) => {
+                            log::error!("An error from the update listener: Api({})", api_error);
+                        },
+                        Some(teloxide::RequestError::Network(network_error)) => {
+                            log::error!("An error from the update listener: Network({:?})", network_error);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                        },
+                        _ => {
+                            log::error!("An unforeseen error from the update listener: {:?}", error);
+                            break;
+                        }
                     }
                 }
             }
 
+            // unreachable statement removed
             teloxide::prelude::respond(())
         }
     }).await;
@@ -653,6 +668,202 @@ async fn handle_buffered_messages(
     }
 
     Err(anyhow::anyhow!("User state not found"))
+}
+
+
+
+
+
+
+
+
+
+
+
+async fn handle_text_message_logic(
+    message: teloxide::prelude::Message, 
+    pool: deadpool_postgres::Pool,
+    bot: teloxide::Bot, 
+    user_id: i64, 
+    chat_id: teloxide::types::ChatId, 
+    openai_key: String,
+    assistant_id: String,
+) -> Result<(), anyhow::Error> {
+    log::info!("Received message: {}", message.text().unwrap_or_default());
+
+    let mut user_states = USER_STATES.write().await;
+    let user_state = user_states.entry(user_id as u64).or_default();
+
+    // Add message to buffer
+    user_state.messages.push(crate::telegram::convert_teloxide_message_to_custom(message.clone()));
+
+    // If there's an existing timer, cancel it
+    if let Some(timer) = user_state.timer.take() {
+        timer.abort();
+        log::info!("Existing timer reset for user_id: {}", user_id);
+    }
+
+    // Handle the buffered messages, get the return values
+    let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
+        user_id as u64,
+        pool.clone(),
+        bot.clone(),
+        chat_id,
+        openai_key.clone(),
+        assistant_id.clone(),
+    ).await?;
+
+    // Creating a new timer based on respond_cue
+    if let Some(delay_seconds) = respond_cue {
+        log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
+        tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
+        
+        let mut user_states = USER_STATES.write().await;
+        if let Some(user_state) = user_states.get(&(user_id as u64)) {
+            if user_state.messages.is_empty() {
+                if let Err(e) = crate::database::insert_message(
+                    pool.clone(),
+                    &convo_thread_id,
+                    "assistant",
+                    &convo_response_text,
+                    "text",
+                    &assistant_id,
+                ).await {
+                    log::error!("Failed to log Convo AI response: {:?}", e);
+                }
+                bot.send_message(chat_id, convo_response_text).await.ok();
+            } else {
+                log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
+                return Ok(()); // Use return to exit early
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+async fn handle_audio_message_logic(
+    message: teloxide::prelude::Message, 
+    pool: deadpool_postgres::Pool,
+    bot: teloxide::Bot, 
+    user_id: i64, 
+    chat_id: teloxide::types::ChatId, 
+    openai_key: String,
+    assistant_id: String,
+) -> Result<(), anyhow::Error> {
+    log::info!("Received audio message");
+
+    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
+
+    let mut user_states = USER_STATES.write().await;
+    let user_state = user_states.entry(user_id as u64).or_default();
+    user_state.messages.push(custom_message);
+
+    // If there's an existing timer, cancel it
+    if let Some(timer) = user_state.timer.take() {
+        timer.abort();
+        log::info!("Existing timer reset for user_id: {}", user_id);
+    }
+
+    // Handle the buffered messages, get the return values
+    let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
+        user_id as u64,
+        pool.clone(),
+        bot.clone(),
+        chat_id,
+        openai_key.clone(),
+        assistant_id.clone(),
+    ).await?;
+
+    // Creating a new timer based on respond_cue
+    if let Some(delay_seconds) = respond_cue {
+        log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
+        tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
+
+        let mut user_states = USER_STATES.write().await;
+        if let Some(user_state) = user_states.get(&(user_id as u64)) {
+            if user_state.messages.is_empty() {
+                if let Err(e) = crate::database::insert_message(
+                    pool.clone(),
+                    &convo_thread_id,
+                    "assistant",
+                    &convo_response_text,
+                    "text",
+                    &assistant_id,
+                ).await {
+                    log::error!("Failed to log Convo AI response: {:?}", e);
+                }
+                bot.send_message(chat_id, convo_response_text).await.ok();
+            } else {
+                log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
+                return Ok(()); // Use return to exit early
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_voice_message_logic(
+    message: teloxide::prelude::Message,
+    pool: deadpool_postgres::Pool, 
+    bot: teloxide::Bot, 
+    user_id: i64, 
+    chat_id: teloxide::types::ChatId, 
+    openai_key: String, 
+    assistant_id: String,
+) -> Result<(), anyhow::Error> {
+    log::info!("Received voice message");
+
+    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
+
+    let mut user_states = USER_STATES.write().await;
+    let user_state = user_states.entry(user_id as u64).or_default();
+    user_state.messages.push(custom_message);
+
+    // If there's an existing timer, cancel it
+    if let Some(timer) = user_state.timer.take() {
+        timer.abort();
+        log::info!("Existing timer reset for user_id: {}", user_id);
+    }
+
+    // Handle the buffered messages, get the return values
+    let (respond_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(
+        user_id as u64,
+        pool.clone(),
+        bot.clone(),
+        chat_id,
+        openai_key.clone(),
+        assistant_id.clone(),
+    ).await?;
+
+    // Creating a new timer based on respond_cue
+    if let Some(delay_seconds) = respond_cue {
+        log::info!("Starting new {}-second timer for user_id: {}", delay_seconds, user_id);
+        tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds as u64)).await;
+
+        let mut user_states = USER_STATES.write().await;
+        if let Some(user_state) = user_states.get(&(user_id as u64)) {
+            if user_state.messages.is_empty() {
+                if let Err(e) = crate::database::insert_message(
+                    pool.clone(),
+                    &convo_thread_id,
+                    "assistant",
+                    &convo_response_text,
+                    "text",
+                    &assistant_id,
+                ).await {
+                    log::error!("Failed to log Convo AI response: {:?}", e);
+                }
+                bot.send_message(chat_id, convo_response_text).await.ok();
+            } else {
+                log::info!("New message received before timer ended. Resetting process for user_id: {}", user_id);
+                return Ok(()); // Use return to exit early
+            }
+        }
+    }
+
+    Ok(())
 }
 // async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, assistant_id: &str, openai_key: &str, initial_message: &str) -> Result<String, anyhow::Error> {
 //     let existing_thread_id = crate::database::get_thread_by_user_id_and_assistant(pool.clone(), user_id, assistant_id).await?;
