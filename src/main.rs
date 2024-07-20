@@ -3,7 +3,7 @@
 use tokio::join;
 use dotenv::dotenv;
 use std::env;
-use webhooks_server::webhooks::run_webhook_server;
+//use webhooks_server::webhooks::run_webhook_server;
 use webhooks_server::telegram::run_telegram_bot;
 
 
@@ -59,13 +59,13 @@ async fn main() {
     log::info!("Database connection pool created");
 
     // Pass the pool to the webhook server and telegram bot
-    let webhook_server = {
-        let pool = pool.clone();
-        tokio::spawn(async move {
-            run_webhook_server(pool).await;
-            log::info!("Webhook server started");
-        })
-    };
+    // let webhook_server = {
+    //     let pool = pool.clone();
+    //     tokio::spawn(async move {
+    //         run_webhook_server(pool).await;
+    //         log::info!("Webhook server started");
+    //     })
+    // };
 
     let telegram_bot = {
         let pool = pool.clone();
@@ -75,5 +75,5 @@ async fn main() {
         })
     };
 
-    let _ = tokio::join!(webhook_server, telegram_bot);
+    // let _ = tokio::join!(webhook_server, telegram_bot);
 }
