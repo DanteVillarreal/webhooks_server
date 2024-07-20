@@ -40,6 +40,7 @@ use crate::Message as CustomMessage;
 
 
 pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
+    log::info!("IS CODE GETTING HEREEEEEEEEEEEEEEE");
     let openai_key = env::var("OPENAI_KEY").expect("OPENAI_KEY not set");
 
     // POST /webhook
