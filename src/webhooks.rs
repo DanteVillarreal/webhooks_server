@@ -49,6 +49,7 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
         .and_then(move |payload: WebhookPayload| {
             let openai_key = openai_key.clone();
             async move {
+                log::info!("Webhook called with payload: {:?}", payload);
                 if let Some(ref message) = payload.message {
                     handle_message_handler(message.clone(), openai_key).await;
                 }
