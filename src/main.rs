@@ -67,13 +67,13 @@ async fn main() {
         })
     };
 
-    let telegram_bot = {
-        let pool = pool.clone();
-        tokio::spawn(async move {
-            run_telegram_bot(pool).await;
-            log::info!("Telegram bot started");
-        })
-    };
+    // let telegram_bot = {
+    //     let pool = pool.clone();
+    //     tokio::spawn(async move {
+    //         run_telegram_bot(pool).await;
+    //         log::info!("Telegram bot started");
+    //     })
+    // };
 
-    let _ = tokio::join!(webhook_server, telegram_bot);
+    // let _ = tokio::join!(webhook_server, telegram_bot);
 }
