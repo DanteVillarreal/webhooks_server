@@ -587,7 +587,9 @@ async fn handle_buffered_messages(
     openai_key: String,
     assistant_id: String,
 ) -> Result<(Option<i32>, String, String), anyhow::Error> {
+    log::info!("about to acquire the write lock for USER_STATES");
     let mut user_states = USER_STATES.write().await;
+    log::info!("acquired the write lock for USER_STATES");
     //  TODO: get user's message linked to the same assistant. because if we intercept the same uer's message but going to another assistant, 
     //      we dont want to concatenate THAT message too
     if let Some(user_state) = user_states.get_mut(&user_id) {
