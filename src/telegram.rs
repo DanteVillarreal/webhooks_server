@@ -373,7 +373,17 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                     //and send the message
                                     log::info!("sending convo response: {}", convo_response_text_clone);
                                     bot.send_message(chat_id, convo_response_text).await.ok();
-
+                                    // Clear the user's message buffer
+                                    match clear_message_buffer(user_id as u64).await {
+                                        Ok(_) => {
+                                            // Successfully cleared the message buffer
+                                            log::info!("Message buffer cleared successfully.");
+                                        }
+                                        Err(e) => {
+                                            // Handle the error
+                                            log::info!("Error clearing message buffer: {:?}", e);
+                                        }
+                                    }
                                 } 
                                 else {
                                     // Handle the case where `response_cue` is `None`
@@ -527,8 +537,10 @@ async fn handle_buffered_messages(
             .collect::<Vec<_>>()
             .join("\n");
 
-        // Clear the user's message buffer
-        user_state.messages.clear();
+        //removed 07/23/24 - because I dont want to clear message buffer until the telegram bot actually sends the message. 
+        //      this is in case a message comes within the 2nd timer.
+        // // Clear the user's message buffer
+        // user_state.messages.clear();
         log::info!("User message buffer cleared for user_id: {}", user_id);
 
         // Step 1: Pre-process the concatenated message with Analyzing AI.
@@ -874,6 +886,21 @@ pub async fn get_or_create_thread(pool: &deadpool_postgres::Pool, user_id: i64, 
         },
     }
 }
+
+async fn clear_message_buffer(user_id: u64) -> Result<(), anyhow::Error> {
+    log::info!("about to acquire the write lock for USER_STATES");
+    let mut user_states = USER_STATES.write().await;
+    log::info!("acquired the write lock for USER_STATES");
+    //  TODO: get user's message linked to the same assistant. because if we intercept the same uer's message but going to another assistant, 
+    //      we dont want to concatenate THAT message too
+    if let Some(user_state) = user_states.get_mut(&user_id) {
+        log::info!("In handle_buffered_messages. Processing buffered messages for user_id: {}", user_id);
+        // Clear the user's message buffer
+        user_state.messages.clear();
+    }
+    Ok(())
+}
+
 
 // async fn handle_buffered_messages(
 //     user_id: u64,
