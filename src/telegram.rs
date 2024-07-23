@@ -356,7 +356,8 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                     // Now you can use `cue` as an `i32`
                                     log::info!("in run_telegram_bot: just finished out of handle_buffered_messages.
                                     respnonse cue timer initiating for {:?} seconds", &response_cue);
-                                    sleep(Duration::from_secs(cue as u64)).await;
+                                    let timer = cue + 30;
+                                    sleep(Duration::from_secs(timer as u64)).await;
                                     //once done sleeping, insert the message into database...
                                     log::info!("in run_telegram_bot: inserting message into database");
                                     if let Err(e) = crate::database::insert_message(
