@@ -514,9 +514,10 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                                             &assistant_id,).await 
                                                         {
                                                             log::error!("run_telegram_bot: Failed to log Convo AI response: {:?}", e);
+                                                            todo!("handle this error. not sure yet how");
                                                         }
                                                         //and send the message
-                                                        log::info!("sending convo response: {}", convo_response_text_clone);
+                                                        log::info!("run_telegarm_bot: sending convo response: {}", convo_response_text_clone);
                                                         bot.send_message(chat_id, convo_response_text).await.ok();
                                                         // Clear the user's message buffer
                                                         match clear_message_buffer(user_id as u64).await {
