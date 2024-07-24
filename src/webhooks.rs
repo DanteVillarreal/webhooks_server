@@ -62,7 +62,7 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
 
     // GET /
-        let html = tokio::fs::read_to_string("index.html").await.expect("Unable to read file");
+        let html = tokio::fs::read_to_string("/home/ubuntu/html_connect/index.html").await.expect("Unable to read file");
         let html_route = warp::path::end()
             .map(move || warp::reply::html(html.clone()));
 
