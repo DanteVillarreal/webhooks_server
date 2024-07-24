@@ -306,7 +306,9 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                     log::info!("Received message: {}", text);
                     let chat_id = message.chat.id;
 
+                    //gets write lock for USER_STATES so I can change it.
                     let mut user_states = USER_STATES.write().await;
+                    //looks for entry in the USER_STATES hashmap corresponding to the user_id
                     let user_state = user_states.entry(user_id as u64).or_default();
 
                     // Add message to buffer
@@ -341,13 +343,15 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                     let assistant_id_clone = assistant_id.clone();
                     let pool_clone = pool.clone();
 
+                    let zero_is_text_one_is_audio_two_is_voice = 0;
+
                     log::info!("Starting 15-second timer for user_id: {}", user_id);
                     user_state.timer = Some(tokio::spawn(async move {
                         log::info!("Waiting for any new messages for user_id: {}", user_id);
                         sleep(Duration::from_secs(15)).await;
 
                         // Handle the collected messages after the timeout
-                        let result = handle_buffered_messages(user_id as u64, pool_clone, bot_clone, chat_id, openai_key_clone, assistant_id_clone).await;
+                        let result = handle_buffered_messages(user_id as u64, pool_clone, bot_clone, chat_id, openai_key_clone, assistant_id_clone, zero_is_text_one_is_audio_two_is_voice).await;
 
                         match result {
                             Ok((response_cue, convo_response_text, convo_thread_id)) => {
@@ -377,7 +381,7 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                                     match clear_message_buffer(user_id as u64).await {
                                         Ok(_) => {
                                             // Successfully cleared the message buffer
-                                            log::info!("Message buffer cleared successfully.");
+                                            log::info!("in run_telegram_bot: Message buffer cleared successfully.");
                                         }
                                         Err(e) => {
                                             // Handle the error
@@ -410,53 +414,175 @@ pub async fn run_telegram_bot(pool: deadpool_postgres::Pool) {
                     }));
                 }
 
-                // Handle audio messages
-                // removed for now until I can handle audio and voice messages properly
-                // else if let Some(audio) = message.audio() {
-                //     log::info!("Received audio message");
+                //Handle audio messages
+                //removed for now until I can handle audio and voice messages properly
+                else if let Some(audio) = message.audio() {
+                    log::info!("Received audio message");
                 
-                //     let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
-                //     let chat_id = message.chat.id;
+                    let mut custom_message = crate::telegram::convert_teloxide_message_to_custom(message.clone());
+                    let chat_id = message.chat.id;
 
-                //     // Buffer the audio message
-                //     let mut user_states = USER_STATES.write().await;
-                //     let user_state = user_states.entry(user_id as u64).or_default();
-                //     user_state.messages.push(custom_message);
+                    //get the file path
+                    //get transcription from handle_audio_message
+                    if let Some(ref mut custom_audio) = &mut custom_message.audio {
+                        match get_file_path(&custom_audio.file_id, &bot_token).await {
+                            Ok(file_path) => {
+                                custom_audio.file_path = Some(file_path);
+                                match handle_audio_message(&bot_token, &custom_audio, &openai_key).await {
+                                    Ok(transcription) => {
+                                        //create new CustomMessage with transcribed text so I can push it into the user_state
+                                        let transcribed_message = CustomMessage {
+                                            message_id: custom_message.message_id,
+                                            from: custom_message.from.clone(),
+                                            chat: custom_message.chat.clone(),
+                                            date: custom_message.date,
+                                            text: Some(transcription),
+                                            audio: None,
+                                            voice: None,
+                                        };
+
+                                        // Buffer the audio message
+                                        let mut user_states = USER_STATES.write().await;
+                                        let user_state = user_states.entry(user_id as u64).or_default();
+                                        user_state.messages.push(transcribed_message);
+                                        
+                                        // abort tokio::spawn'ed task if it exists. aka if 
+                                        //  one of the timers is still going, abort the tokio::spawn
+                                        if let Some(timer) = user_state.timer.take() {
+                                            timer.abort();
+                                        }
+
+                                        let bot_clone = bot.clone();
+                                        let openai_key_clone = openai_key.clone();
+                                        let assistant_id_clone = assistant_id.clone();
+                                        let pool_clone = pool.clone();
+
+                                        let zero_is_text_one_is_audio_two_is_voice = 1;
+
+
+                                    //IMPORTANT code comment explaining the code:
+                                    //tokio::spawn spawns an asynch task that run async - ok we know this
+                                    //then it RETURNS a JoinHandle. the "JoinHandle" is what allows us to control the spawned task
+                                    //this "JoinHandle" is then assigned to user_state.timer in user_state.timer = Some(tokio::spawn...). 
+                                    //So when run_telegram_bot() receives a new message, it goes through the logic and gets here:
+                                    //if let Some(timer) = user_state.timer.take() {
+                                    //     timer.abort();
+                                    // }
+                                    // user_state.timer is one of 2 things because of the code below: None or Some(JoinHandle<()>) .
+                                    //if let Some(timer) = user_state.timer.take() {} first turns 
+                                    //      user_state.timer to None, then says if
+                                    //      user_state.timer WAS a Some(something) and not None(),
+                                    //      aka before we did the take(), if user_state.timer
+                                    //      was a Some(T) and not None(),
+                                    //      let/set the new timer variable to something, aka JoinHandle<()>,
+                                    //      and do the code in {}. So in this context, the abort() method
+                                    //      is called on JoinHandle, which basically does what it says.
+
+                                        log::info!("Starting 15-second timer for user_id: {}", user_id);
+                                        user_state.timer = Some(tokio::spawn(async move {
+                                            log::info!("Waiting for any new messages for user_id: {}", user_id);
+                                            sleep(Duration::from_secs(15)).await;
+
+                                            // Handle the collected messages after the timeout
+                                            let result = 
+                                                handle_buffered_messages(
+                                                    user_id as u64, 
+                                                    pool_clone, 
+                                                    bot_clone, chat_id, 
+                                                    openai_key_clone, 
+                                                    assistant_id_clone,
+                                                    zero_is_text_one_is_audio_two_is_voice,
+                                                ).await;
+
+                                            match result {
+                                                Ok((response_cue, convo_response_text, convo_thread_id)) => {
+                                                    let convo_response_text_clone = convo_response_text.clone();
+                                                    if let Some(cue) = response_cue {
+                                                        // Now you can use `cue` as an `i32`
+                                                        log::info!("in run_telegram_bot: just finished out of handle_buffered_messages.
+                                                        respnonse cue timer initiating for {:?} seconds", &response_cue);
+                                                        let timer = cue + 30;
+                                                        sleep(Duration::from_secs(timer as u64)).await;
+                                                        //once done sleeping, insert the message into database...
+                                                        log::info!("in run_telegram_bot: inserting message into database");
+                                                        if let Err(e) = crate::database::insert_message(
+                                                            pool.clone(),
+                                                            &convo_thread_id,
+                                                            "assistant",
+                                                            &convo_response_text,
+                                                            "text",
+                                                            &assistant_id,).await 
+                                                        {
+                                                            log::error!("run_telegram_bot: Failed to log Convo AI response: {:?}", e);
+                                                        }
+                                                        //and send the message
+                                                        log::info!("sending convo response: {}", convo_response_text_clone);
+                                                        bot.send_message(chat_id, convo_response_text).await.ok();
+                                                        // Clear the user's message buffer
+                                                        match clear_message_buffer(user_id as u64).await {
+                                                            Ok(_) => {
+                                                                // Successfully cleared the message buffer
+                                                                log::info!("in run_telegram_bot: Message buffer cleared successfully.");
+                                                            }
+                                                            Err(e) => {
+                                                                // Handle the error
+                                                                log::info!("Error clearing message buffer: {:?}", e);
+                                                            }
+                                                        }
+                                                    } 
+                                                    else {
+                                                        // Handle the case where `response_cue` is `None`
+                                                        log::error!("in run_telegram_bot: No response cue available.");
+                                                        todo!("handle error where response cue is None. 
+                                                        aka if Analyzing AI fucked up. maybe try repeating the exact message?");
+                                                    }
+                                                    log::info!("run_telegram_bot: Thread ID: {}", convo_thread_id);
+                                                }
+                                                Err(e) => {
+                                                    // Handle the error
+                                                    log::info!("run_telegram_bot: Error handling buffered messages: {:?}", e);
+                                                    todo!("see if I can get the message from the database");
+                                                }
+                                            }
+                                        }));
+                                    },
+                                    Err(e) => {
+                                        log::error!("Failed to handle audio message: {:?}", e);
+                                        bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                log::error!("Failed to retrieve file path: {:?}", e);
+                                bot.send_message(chat_id, "Failed to process your audio message. Please try again later.").await?;
+                            }
+                        }
+                    }
+
+                    //Put up top on 07/23/24 - 09 52 pm
+                    // // Buffer the audio message
+                    // let mut user_states = USER_STATES.write().await;
+                    // let user_state = user_states.entry(user_id as u64).or_default();
+                    // user_state.messages.push(custom_message);
                     
-                //     // Reset the timer if it's active
-                //     if let Some(timer) = user_state.timer.take() {
-                //         timer.abort();
-                //     }
+                    // // Reset the timer if it's active
+                    // if let Some(timer) = user_state.timer.take() {
+                    //     timer.abort();
+                    // }
 
-                //     let bot_clone = bot.clone();
-                //     let openai_key_clone = openai_key.clone();
-                //     let assistant_id_clone = assistant_id.clone();
-                //     let pool_clone = pool.clone();
+                    // let bot_clone = bot.clone();
+                    // let openai_key_clone = openai_key.clone();
+                    // let assistant_id_clone = assistant_id.clone();
+                    // let pool_clone = pool.clone();
 
-                //     //IMPORTANT code comment explaining the code:
-                //     //tokio::spawn spawns an asynch task that run async - ok we know this
-                //     //then it RETURNS a JoinHandle. the "JoinHandle" is what allows us to control the spawned task
-                //     //this "JoinHandle" is then assigned to user_state.timer in user_state.timer = Some(tokio::spawn...). 
-                //     //So when run_telegram_bot() receives a new message, it goes through the logic and gets here:
-                //     //if let Some(timer) = user_state.timer.take() {
-                //     //     timer.abort();
-                //     // }
-                //     // user_state.timer is one of 2 things because of the code below: None or Some(JoinHandle<()>) .
-                //     //if let Some(timer) = user_state.timer.take() {} first turns 
-                //     //      user_state.timer to None, then says if
-                //     //      user_state.timer WAS a Some(something) and not None(),
-                //     //      aka before we did the take(), if user_state.timer
-                //     //      was a Some(T) and not None(),
-                //     //      let/set the new timer variable to something, aka JoinHandle<()>,
-                //     //      and do the code in {}. So in this context, the abort() method
-                //     //      is called on JoinHandle, which basically does what it says.
-                //     user_state.timer = Some(tokio::spawn(async move {
-                //         sleep(Duration::from_secs(15)).await;
 
-                //         // Handle the collected messages after the timeout
-                //         let (response_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(user_id as u64, pool_clone, bot_clone, chat_id, openai_key_clone, assistant_id_clone).await;
-                //     }));
-                // }
+                    // user_state.timer = Some(tokio::spawn(async move {
+                    //     sleep(Duration::from_secs(15)).await;
+
+                    //     // Handle the collected messages after the timeout
+                    //     let (response_cue, convo_response_text, convo_thread_id) = handle_buffered_messages(user_id as u64, pool_clone, bot_clone, chat_id, openai_key_clone, assistant_id_clone).await;
+                    // }));
+                }
 
                 // // Handle voice messages
                 // else if let Some(voice) = message.voice() {
@@ -520,6 +646,7 @@ async fn handle_buffered_messages(
     chat_id: teloxide::types::ChatId,
     openai_key: String,
     assistant_id: String,
+    zero_is_text_one_is_audio_two_is_voice: i32,
 ) -> Result<(Option<i32>, String, String), anyhow::Error> {
     log::info!("about to acquire the write lock for USER_STATES");
     let mut user_states = USER_STATES.write().await;
@@ -576,14 +703,41 @@ async fn handle_buffered_messages(
         let (convo_thread_id, is_new_thread) = crate::telegram::get_or_create_thread(&pool, user_id as i64, &assistant_id, &openai_key, &final_message).await?;
 
         // Step 5b: Insert user's concatenated message into the database.
-        crate::database::insert_message(
-            pool.clone(),
-            &convo_thread_id,
-            "assistant",
-            &response_text,
-            "text",
-            analyzing_ai_id,
-        ).await?;
+        if zero_is_text_one_is_audio_two_is_voice == 0 {
+            crate::database::insert_message(
+                pool.clone(),
+                &convo_thread_id,
+                "assistant",
+                &response_text,
+                "text",
+                analyzing_ai_id,
+            ).await?;
+        }
+        else if zero_is_text_one_is_audio_two_is_voice == 1 {
+            crate::database::insert_message(
+                pool.clone(),
+                &convo_thread_id,
+                "assistant",
+                &response_text,
+                "audio",
+                analyzing_ai_id,
+            ).await?;
+        }
+        else if zero_is_text_one_is_audio_two_is_voice == 2 {
+            crate::database::insert_message(
+                pool.clone(),
+                &convo_thread_id,
+                "assistant",
+                &response_text,
+                "voice",
+                analyzing_ai_id,
+            ).await?;
+        }
+        else {
+            log::error!("handle_buffered_messages: received message type that is not text, audio, voice.
+            zero_is_text_one_is_audio_two_is_voice = {}", &zero_is_text_one_is_audio_two_is_voice);
+            bot.send_message(chat_id, "could not figure out what message type you sent. can you please try again with text, voice, or audio").await.ok();
+        }
 
         // Step 3: Insert parsed variables into the database.
         crate::database::insert_pre_processing_results(
