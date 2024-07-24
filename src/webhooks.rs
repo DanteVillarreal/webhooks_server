@@ -58,7 +58,20 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
             }
         });
 
-    warp::serve(webhook_route)
+
+
+
+    // GET /
+        let html = tokio::fs::read_to_string("index.html").await.expect("Unable to read file");
+        let html_route = warp::path::end()
+            .map(move || warp::reply::html(html.clone()));
+
+    
+    // Combine routes:
+        let routes = webhook_route.or(html_route);
+
+    // Starts the warp server    
+    warp::serve(routes)
         .run(([0, 0, 0, 0], 80))
         .await;
 }
