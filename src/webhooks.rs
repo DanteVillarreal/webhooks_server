@@ -86,8 +86,8 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
     warp::serve(routes)
     .tls()
-    .cert_path(cert_path)
-    .key_path(key_path)
+    .cert(cert_path)
+    .key(key_path)
     .run(([0, 0, 0, 0], 443))
     .await;
 
