@@ -89,7 +89,7 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
 
     warp::serve(routes)
-    .run(([0, 0, 0, 0], 80))
+    .run(([0, 0, 0, 0], 443))
     .await;
 
 
