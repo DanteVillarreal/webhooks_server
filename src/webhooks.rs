@@ -76,18 +76,22 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
     
     // Combine routes:
-        // let routes = warp::any().map(|| "Hello, World!");
-        let routes = webhook_route.or(html_route);
+        let routes = warp::any().map(|| "Hello, World!");
+        //let routes = webhook_route.or(html_route);
 
     // Load SSL keys and certs
         let cert_path = "/etc/letsencrypt/live/merivilla.com/fullchain.pem";
         let key_path = "/home/ubuntu/new_certs/pkcs8.key";
 
+    // Read the cert and private key file into memory
+        let cert_contents = std::fs::read(cert_path).expect("failed to read cert file");
+        let key_contents = std::fs::read(key_path).expect("Failed to read private key file");
+
 
     warp::serve(routes)
     .tls()
-    .cert(cert_path)
-    .key(key_path)
+    .cert(cert_contents)
+    .key(key_contents)
     .run(([0, 0, 0, 0], 443))
     .await;
 
