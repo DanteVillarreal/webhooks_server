@@ -81,7 +81,7 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
     // Load SSL keys and certs
         let cert_path = "/etc/letsencrypt/live/merivilla.com/fullchain.pem";
-        let key_path = "/etc/letsencrypt/live/merivilla.com/privkey.pem";
+        let key_path = "/home/ubuntu/new_certs/pkcs8.key";
 
 
     warp::serve(routes)
