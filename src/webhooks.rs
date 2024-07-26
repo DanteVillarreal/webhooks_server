@@ -88,17 +88,17 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
         let key_contents = std::fs::read(key_path).expect("Failed to read private key file");
 
 
+    // warp::serve(routes)
+    // .run(([0, 0, 0, 0], 80))
+    // .await;
+
+
     warp::serve(routes)
+    .tls()
+    .cert(cert_path)
+    .key(key_path)
     .run(([0, 0, 0, 0], 443))
     .await;
-
-
-    // warp::serve(routes)
-    // .tls()
-    // .cert(cert_contents)
-    // .key(key_contents)
-    // .run(([0, 0, 0, 0], 443))
-    // .await;
 
 
 
