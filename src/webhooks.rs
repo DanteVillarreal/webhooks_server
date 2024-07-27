@@ -76,7 +76,10 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
     
     // Combine routes:
-        let routes = warp::any().map(|| "Hello, World!");
+        let routes = 
+            warp::any()
+                    .and_then(handle_request)
+                    .recover(handle_rejection);
         //let routes = webhook_route.or(html_route);
 
     // Load SSL keys and certs
@@ -92,6 +95,7 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
     // .run(([0, 0, 0, 0], 80))
     // .await;
 
+    log::info!("Starting the server...");
 
     warp::serve(routes)
     .tls()
@@ -149,3 +153,11 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
 }
 
+async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, std::convert::Infallible> {
+    log::error!("Request was rejected: {:?}", err);
+    Ok(warp::reply::with_status("Internal Server Error", warp::http::StatusCode::INTERNAL_SERVER_ERROR))
+}
+async fn handle_request() -> Result<impl warp::Reply, warp::Rejection> {
+    log::info!("Received a request");
+    Ok("Hello, World!")
+}
