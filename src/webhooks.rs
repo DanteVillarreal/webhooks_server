@@ -76,11 +76,11 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
     
     // Combine routes:
-        let routes = 
-            warp::any()
-                    .and_then(handle_request)
-                    .recover(handle_rejection);
-        //let routes = webhook_route.or(html_route);
+        // let routes = 
+        //     warp::any()
+        //             .and_then(handle_request)
+        //             .recover(handle_rejection);
+        let routes = webhook_route.or(html_route);
 
     // Load SSL keys and certs
         let cert_path = "/etc/letsencrypt/live/merivilla.com/fullchain.pem";
