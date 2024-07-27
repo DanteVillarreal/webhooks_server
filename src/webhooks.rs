@@ -84,7 +84,7 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
     // Load SSL keys and certs
         let cert_path = "/etc/letsencrypt/live/merivilla.com/fullchain.pem";
-        let key_path = "/home/ubuntu/new_certs/pkcs8.key";
+        let key_path = "/etc/letsencrypt/live/merivilla.com/privkey.pem";
 
     // Read the cert and private key file into memory
         let cert_contents = std::fs::read(cert_path).expect("failed to read cert file");
