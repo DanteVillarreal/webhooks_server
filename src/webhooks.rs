@@ -104,12 +104,12 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
     
     // Combine routes:
         //un code comment this if you just want to see if a request comes in
-            // let routes = 
-            //     warp::any()
-            //             .and_then(handle_request)
-            //             .recover(handle_rejection);
+            let routes = 
+                warp::any()
+                        .and_then(handle_request)
+                        .recover(handle_rejection);
         
-        let routes = inbound_message.or(html_route).or(message_status);
+        //let routes = inbound_message.or(html_route).or(message_status);
 
     // Load SSL keys and certs
         let cert_path = "/etc/letsencrypt/live/merivilla.com/fullchain.pem";
@@ -130,11 +130,11 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
 }
 //un code comment this if you just want to see if a request comes in
-    // async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, std::convert::Infallible> {
-    //     log::error!("Request was rejected: {:?}", err);
-    //     Ok(warp::reply::with_status("Internal Server Error", warp::http::StatusCode::INTERNAL_SERVER_ERROR))
-    // }
-    // async fn handle_request() -> Result<impl warp::Reply, warp::Rejection> {
-    //     log::info!("Received a request");
-    //     Ok("Hello, World!")
-    // }
+    async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, std::convert::Infallible> {
+        log::error!("Request was rejected: {:?}", err);
+        Ok(warp::reply::with_status("Internal Server Error", warp::http::StatusCode::INTERNAL_SERVER_ERROR))
+    }
+    async fn handle_request() -> Result<impl warp::Reply, warp::Rejection> {
+        log::info!("Received a request");
+        Ok("Hello, World!")
+    }
