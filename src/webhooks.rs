@@ -69,6 +69,33 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
 
 
+
+//--voner webhooks filters --//
+
+
+
+    let inbound_message = warp::path("webhooks")
+        .and(warp::path("inbound-message"))
+        .and(warp::post())
+        .and(warp::body::json())
+        .map(|body: serde_json::Value| {
+            println!("Received inbound message: {:?}", body);
+            warp::reply::json(&body)
+    });
+    // Define the message status filter
+    let message_status = warp::path("webhooks")
+        .and(warp::path("message-status"))
+        .and(warp::post())
+        .and(warp::body::json())
+        .map(|body: serde_json::Value| {
+            println!("Received message status: {:?}", body);
+            warp::reply::json(&body)
+    });
+
+//--^^voner webhooks filters ^^--//
+
+
+
     // GET /
         let html = tokio::fs::read_to_string("/home/ubuntu/html_connect/index.html").await.expect("Unable to read file");
         let html_route = warp::path::end()
@@ -76,88 +103,38 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
     
     // Combine routes:
-        let routes = 
-            warp::any()
-                    .and_then(handle_request)
-                    .recover(handle_rejection);
-        // let routes = webhook_route.or(html_route);
+        //un code comment this if you just want to see if a request comes in
+            // let routes = 
+            //     warp::any()
+            //             .and_then(handle_request)
+            //             .recover(handle_rejection);
+        
+        let routes = inbound_message.or(html_route).or(message_status);
 
     // Load SSL keys and certs
         let cert_path = "/etc/letsencrypt/live/merivilla.com/fullchain.pem";
         let key_path = "/etc/letsencrypt/live/merivilla.com/privkey.pem";
 
-    // Read the cert and private key file into memory
-        let cert_contents = std::fs::read(cert_path).expect("failed to read cert file");
-        let key_contents = std::fs::read(key_path).expect("Failed to read private key file");
-
-
-    // warp::serve(routes)
-    // .run(([0, 0, 0, 0], 80))
-    // .await;
 
     log::info!("Starting the server...");
 
     warp::serve(routes)
-    .tls()
-    .cert_path(cert_path)
-    .key_path(key_path)
-    .run(([0, 0, 0, 0], 443))
-    .await;
+        .tls()
+        .cert_path(cert_path)
+        .key_path(key_path)
+        .run(([0, 0, 0, 0], 443))
+        .await;
 
 
 
-    //     let cert_file = &mut std::io::BufReader::new(std::fs::File::open(cert_path).expect("Certificate file not found"));
-    //     let key_file = &mut std::io::BufReader::new(std::fs::File::open(key_path).expect("Key file not found"));
-    
-    
-
-    //     let cert_chain = rustls_pemfile::certs(cert_file)
-    //     .filter_map(Result::ok)
-    //     .map(rustls::Certificate)
-    //     .collect::<Vec<_>>();
-
-    // let mut keys = rustls_pemfile::pkcs8_private_keys(key_file)
-    //     .filter_map(Result::ok)
-    //     .map(rustls::PrivateKey)
-    //     .collect::<Vec<_>>();
-
-    
-    
-    //     if keys.is_empty() {
-    //         panic!("No valid private keys found!");
-    //     }
-
-    //     let config = rustls::ServerConfig::builder()
-    //     .with_safe_defaults()
-    //     .with_no_client_auth()
-    //     .with_single_cert(cert_chain, keys.remove(0))
-    //     .expect("Failed to create config");
-
-    //     let config = Arc::new(config);
-
-    // // Configure warp to run with TLS
-    //     let tls = warp::tls()
-    //         .cert_path(cert_path)
-    //         .key_path(key_path);
-
-    //     //listening to port 443 because 80 is for http, 443 is standard for https
-    //     let listener = TcpListener::bind("0.0.0.0:443").await.expect("TCP listener failed to bind");
-
-
-
-    // // Starts the warp server    
-    // warp::serve(webhook_route)
-    //     .tls(tls)
-    //     .run_incoming(TlsConfigBuilder::from(config).context(warp::service(webhook_route.into_service())).std_listener(listener))
-    //     .await;
 
 }
-
-async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, std::convert::Infallible> {
-    log::error!("Request was rejected: {:?}", err);
-    Ok(warp::reply::with_status("Internal Server Error", warp::http::StatusCode::INTERNAL_SERVER_ERROR))
-}
-async fn handle_request() -> Result<impl warp::Reply, warp::Rejection> {
-    log::info!("Received a request");
-    Ok("Hello, World!")
-}
+//un code comment this if you just want to see if a request comes in
+    // async fn handle_rejection(err: warp::Rejection) -> Result<impl warp::Reply, std::convert::Infallible> {
+    //     log::error!("Request was rejected: {:?}", err);
+    //     Ok(warp::reply::with_status("Internal Server Error", warp::http::StatusCode::INTERNAL_SERVER_ERROR))
+    // }
+    // async fn handle_request() -> Result<impl warp::Reply, warp::Rejection> {
+    //     log::info!("Received a request");
+    //     Ok("Hello, World!")
+    // }
