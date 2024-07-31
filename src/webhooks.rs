@@ -106,6 +106,9 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
         //un code comment this if you just want to see if a request comes in
             let routes = 
                 warp::any()
+                        .and(warp::filters::method::method())
+                        .and(warp::filters::path::full())
+                        .and(warp::body::json())
                         .and_then(handle_request)
                         .recover(handle_rejection);
         
@@ -134,7 +137,7 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
         log::error!("Request was rejected: {:?}", err);
         Ok(warp::reply::with_status("Internal Server Error", warp::http::StatusCode::INTERNAL_SERVER_ERROR))
     }
-    async fn handle_request() -> Result<impl warp::Reply, warp::Rejection> {
-        log::info!("Received a request");
+    async fn handle_request(method: warp::http::Method, path: warp::filters::path::FullPath, body: serde_json::Value) -> Result<impl warp::Reply, warp::Rejection> {
+        log::info!("Received a request: method: {:?}, path: {:?}, body: {:?}", method, path, body);
         Ok("Hello, World!")
     }
