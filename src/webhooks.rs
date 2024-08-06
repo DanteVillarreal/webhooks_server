@@ -97,22 +97,22 @@ pub async fn run_webhook_server(pool: deadpool_postgres::Pool) {
 
 
     // GET /
-        let html = tokio::fs::read_to_string("/home/ubuntu/html_connect/index.html").await.expect("Unable to read file");
+        let html = tokio::fs::read_to_string("/home/ubuntu/html_connect/index2.html").await.expect("Unable to read file");
         let html_route = warp::path::end()
             .map(move || warp::reply::html(html.clone()));
 
     
     // Combine routes:
         //un code comment this if you just want to see if a request comes in
-            let routes = 
-                warp::any()
-                        .and(warp::filters::method::method())
-                        .and(warp::filters::path::full())
-                        .and(warp::body::json())
-                        .and_then(handle_request)
-                        .recover(handle_rejection);
+            // let routes = 
+            //     warp::any()
+            //             .and(warp::filters::method::method())
+            //             .and(warp::filters::path::full())
+            //             .and(warp::body::json())
+            //             .and_then(handle_request)
+            //             .recover(handle_rejection);
         
-        //let routes = inbound_message.or(html_route).or(message_status);
+        let routes = html_route.or(message_status);
 
     // Load SSL keys and certs
         let cert_path = "/etc/letsencrypt/live/merivilla.com/fullchain.pem";
